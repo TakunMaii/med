@@ -10,7 +10,6 @@
 
 typedef struct {
     char *content;
-    int length;
 } LineBuffer;
 
 typedef struct {
@@ -22,7 +21,6 @@ LineBuffer *createLineBuffer()
 {
     LineBuffer *line = (LineBuffer *)malloc(sizeof(LineBuffer));
     line->content = (char *)malloc(TEXT_BUFFER_MAX_LINE_LENGTH);
-    line->length = 0;
     return line;
 }
 
@@ -31,8 +29,7 @@ LineBuffer *createLineBufferWith(const char* content)
     LineBuffer *line = (LineBuffer *)malloc(sizeof(LineBuffer));
     line->content = (char *)malloc(TEXT_BUFFER_MAX_LINE_LENGTH);
     memcpy(line->content, content, strlen(content));
-    line->length = strlen(content);
-    line->content[line->length] = '\0'; // Null-terminate the string
+    line->content[strlen(content)] = '\0'; // Null-terminate the string
     return line;
 }
 
@@ -50,6 +47,13 @@ TextBuffer *createTextBufferWith(char* content)
     textBuffer->lines = (LineBuffer **)malloc(TEXT_BUFFER_MAX_LINES * sizeof(LineBuffer*));
     textBuffer->line_count = 0;
 
+    if(strlen(content) == 0)
+    {
+        textBuffer->lines[0] = createLineBufferWith("");
+        textBuffer->line_count = 1;
+        return textBuffer;
+    }
+
     char *linecpy = (char *)malloc(strlen(content) + 1);
     strcpy(linecpy, content);
     char *line = strtok(linecpy, "\n");
@@ -63,6 +67,23 @@ TextBuffer *createTextBufferWith(char* content)
         else
             printf("INFO: Text Buffer Creation Completion\n");
     }
+    return textBuffer;
+}
+
+TextBuffer* createTextBufferWithFile(const char* filename)
+{
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        printf("ERR: Could not open file %s\n", filename);
+        return NULL;
+    }
+    TextBuffer *textBuffer = createTextBuffer();
+    char line[TEXT_BUFFER_MAX_LINE_LENGTH];
+    while (fgets(line, sizeof(line), file) != NULL && textBuffer->line_count < TEXT_BUFFER_MAX_LINES) {
+        LineBuffer *newLine = createLineBufferWith(line);
+        textBuffer->lines[textBuffer->line_count++] = newLine;
+    }
+    fclose(file);
     return textBuffer;
 }
 
@@ -114,12 +135,12 @@ void insertCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex, char con
         return; // Line index out of bounds
     }
 
-    if(charIndex > textBuffer->lines[lineIndex]->length)
+    if(charIndex > strlen(textBuffer->lines[lineIndex]->content))
     {
-        charIndex = textBuffer->lines[lineIndex]->length;
+        charIndex = strlen(textBuffer->lines[lineIndex]->content);
     }
 
-    if(textBuffer->lines[lineIndex]->length >= TEXT_BUFFER_MAX_LINE_LENGTH)
+    if(strlen(textBuffer->lines[lineIndex]->content) >= TEXT_BUFFER_MAX_LINE_LENGTH)
     {
         printf("ERR: Line is full but still trying to insert a new char\n");
         return; // Line is full
@@ -127,9 +148,8 @@ void insertCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex, char con
 
     LineBuffer *line = textBuffer->lines[lineIndex];
     memmove(&line->content[charIndex + 1], &line->content[charIndex], 
-            line->length - charIndex + 1);// +1 for null terminator
+            strlen(line->content) - charIndex + 1);// +1 for null terminator
     line->content[charIndex] = content;
-    line->length++;
 }
 
 void deleteCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex)
@@ -146,7 +166,7 @@ void deleteCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex)
         return; // Line index out of bounds
     }
 
-    if(charIndex >= textBuffer->lines[lineIndex]->length)
+    if(charIndex >= strlen(textBuffer->lines[lineIndex]->content))
     {
         printf("WARN: Char index out of bounds\n");
         return; // Char index out of bounds
@@ -160,22 +180,21 @@ void deleteCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex)
 
     LineBuffer *line = textBuffer->lines[lineIndex];
     memmove(&line->content[charIndex], &line->content[charIndex + 1], 
-            line->length - charIndex);
-    line->length--;
+            strlen(line->content) - charIndex);
 }
 
 char *wholeText(TextBuffer *textBuffer)
 {
     int totalLength = 0;
     for (int i = 0; i < textBuffer->line_count; ++i) {
-        totalLength += textBuffer->lines[i]->length + 1; // +1 for newline
+        totalLength += strlen(textBuffer->lines[i]->content) + 1; // +1 for newline
     }
 
     char *text = (char *)malloc(totalLength);
     int offset = 0;
     for (int i = 0; i < textBuffer->line_count; ++i) {
-        memcpy(text + offset, textBuffer->lines[i]->content, textBuffer->lines[i]->length);
-        offset += textBuffer->lines[i]->length;
+        memcpy(text + offset, textBuffer->lines[i]->content, strlen(textBuffer->lines[i]->content));
+        offset += strlen(textBuffer->lines[i]->content);
         text[offset++] = '\n';
     }
     text[offset - 1] = '\0'; // Replace last newline with null terminator

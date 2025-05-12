@@ -84,12 +84,12 @@ void processKeyEvent(SDL_Event event)
       }
       else if (cursorY > 0) {
           ///length is not used
-          int x = textBuffer->lines[cursorY - 1]->length;
-          strcpy(textBuffer->lines[cursorY - 1]->content + textBuffer->lines[cursorY - 1]->length,
+          int x = strlen(textBuffer->lines[cursorY - 1]->content);
+          strcpy(textBuffer->lines[cursorY - 1]->content + strlen(textBuffer->lines[cursorY - 1]->content),
                 textBuffer->lines[cursorY]->content);
           deleteLineAt(textBuffer, cursorY);
           cursorY--;
-          cursorX = 0;
+          cursorX = x;
       }
   } else if (event.key.keysym.sym == SDLK_UP) {
       cursorY--;
@@ -101,22 +101,26 @@ void processKeyEvent(SDL_Event event)
       if (cursorY > textBuffer->line_count - 1) {
         cursorY = textBuffer->line_count - 1;
       }
+      if(cursorX > strlen(textBuffer->lines[cursorY]->content))
+      {
+        cursorX = strlen(textBuffer->lines[cursorY]->content);
+      }
   } else if (event.key.keysym.sym == SDLK_LEFT) {
       cursorX--;
       if (cursorX < 0 && cursorY > 0) {
         cursorY--;
-        cursorX = textBuffer->lines[cursorY]->length;
+        cursorX = strlen(textBuffer->lines[cursorY]->content);
       } else if (cursorX < 0) {
         cursorX = 0;
       }
   } else if (event.key.keysym.sym == SDLK_RIGHT) {
         cursorX++;
-        if (cursorX > textBuffer->lines[cursorY]->length
+        if (cursorX > strlen(textBuffer->lines[cursorY]->content)
             && cursorY < textBuffer->line_count - 1) {
           cursorX = 0;
           cursorY++;
-        } else if (cursorX > textBuffer->lines[cursorY]->length) {
-          cursorX = textBuffer->lines[cursorY]->length;
+        } else if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
+          cursorX = strlen(textBuffer->lines[cursorY]->content);
         }
   } else if (event.key.keysym.sym == SDLK_RETURN) {
     const char *restLine = textBuffer->lines[cursorY]->content + cursorX;
@@ -130,7 +134,14 @@ void processKeyEvent(SDL_Event event)
   }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc > 1) {
+        textBuffer = createTextBufferWithFile(argv[1]);
+    } else {
+        textBuffer = createTextBufferWith("");
+    }
+
+
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window =
       SDL_CreateWindow("Med", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
@@ -144,7 +155,6 @@ int main() {
   checkstatus(TTF_Init());
 
   TTF_Font *font = TTF_OpenFont("font.ttf", 24);
-  textBuffer = createTextBufferWith("Hello, World!\nThis is med, aka, maii's editor");
 
   while (!quit) {
     SDL_Event event;
