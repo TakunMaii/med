@@ -7,6 +7,7 @@
 #include <SDL2/SDL_video.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "KeyProcess.h"
 
 #define WINDOW_WIDTH 640
 #define WINDOW_HEIGHT 480
@@ -73,6 +74,29 @@ void renderCursor(SDL_Renderer *renderer, TTF_Font *font, float x, float y) {
   SDL_RenderFillRect(renderer, &rect);
 }
 
+void fallbackKeyProcess(Key key)
+{
+    if(!isPrintable(key.sym))return;
+    char keyPressed = key.sym;
+    if (key.mod & KMOD_SHIFT) {
+      keyPressed = toupper(key.sym);
+    }
+    insertCharAt(textBuffer, cursorY, cursorX, keyPressed);
+    cursorX++;
+}
+
+void test()
+{
+    printf("test\n");
+}
+
+void processKeyInit()
+{
+    registerKeyFallbackProcess(fallbackKeyProcess);
+    KeyChain keychain = str2KeyChain("jj");
+    registerKeyBinding(keychain, test);
+}
+
 void processKeyEvent(SDL_Event event)
 {
   if (event.key.keysym.sym == SDLK_ESCAPE) {
@@ -83,7 +107,6 @@ void processKeyEvent(SDL_Event event)
         cursorX--;
       }
       else if (cursorY > 0) {
-          ///length is not used
           int x = strlen(textBuffer->lines[cursorY - 1]->content);
           strcpy(textBuffer->lines[cursorY - 1]->content + strlen(textBuffer->lines[cursorY - 1]->content),
                 textBuffer->lines[cursorY]->content);
@@ -128,9 +151,9 @@ void processKeyEvent(SDL_Event event)
     textBuffer->lines[cursorY]->content[cursorX] = '\0';
     cursorX = 0;
     cursorY++;
-  } else {
-    insertCharAt(textBuffer, cursorY, cursorX, event.key.keysym.sym);
-    cursorX++;
+  } else{//printable characters
+    bool halt;
+    processKey(event.key.keysym, &halt);
   }
 }
 
@@ -155,6 +178,8 @@ int main(int argc, char *argv[]) {
   checkstatus(TTF_Init());
 
   TTF_Font *font = TTF_OpenFont("font.ttf", 24);
+
+  processKeyInit();
 
   while (!quit) {
     SDL_Event event;

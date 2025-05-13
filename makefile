@@ -1,5 +1,5 @@
 HEADERS=TextBuffer.h
-SRC=main.c
+SRC=main.c TextBuffer.c
 CC=gcc
 CFLAGS=-Wall -Wextra -pedantic -std=c99 -lSDL2_ttf
 
