@@ -16,6 +16,9 @@ bool quit = false;
 TextBuffer *textBuffer;
 int cursorX = 0;
 int cursorY = 0;
+float textPanelBiasX = 0;
+float textPanelBiasY = 0;
+float timer = 0;
 const int lineSpace = 5;
 const int TextBeginX = 10;
 const int TextBeginY = 10;
@@ -151,10 +154,40 @@ void processKeyEvent(SDL_Event event)
     textBuffer->lines[cursorY]->content[cursorX] = '\0';
     cursorX = 0;
     cursorY++;
-  } else{//printable characters
+  } else{
     bool halt;
     processKey(event.key.keysym, &halt);
   }
+}
+
+void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font)
+{
+    *cursorPosX = TextBeginX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
+    *cursorPosY = TextBeginY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
+
+    const float cursorPaddingX = 0.2f * TTF_FontHeight(font);
+    const float cursorPaddingY = 2.0f * TTF_FontHeight(font);
+
+    if(*cursorPosX < cursorPaddingX)
+    {
+        textPanelBiasX += cursorPaddingX - *cursorPosX;
+    }
+    else if(*cursorPosX > WINDOW_WIDTH - cursorPaddingX)
+    {
+        textPanelBiasX += WINDOW_WIDTH - cursorPaddingX - *cursorPosX;
+    }
+
+    if(*cursorPosY < cursorPaddingY)
+    {
+        textPanelBiasY += cursorPaddingY - *cursorPosY;
+    }
+    else if(*cursorPosY > WINDOW_HEIGHT - cursorPaddingY)
+    {
+        textPanelBiasY += WINDOW_HEIGHT - cursorPaddingY - *cursorPosY;
+    }
+
+    *cursorPosX = TextBeginX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
+    *cursorPosY = TextBeginY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
 }
 
 int main(int argc, char *argv[]) {
@@ -178,7 +211,9 @@ int main(int argc, char *argv[]) {
   checkstatus(TTF_Init());
 
   TTF_Font *font = TTF_OpenFont("font.ttf", 24);
+  checkptr(font);
 
+  KEYPROCESS_Init();
   processKeyInit();
 
   while (!quit) {
@@ -194,12 +229,20 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    const float curTime = (float)SDL_GetTicks64()/1000;
+    KEYPROCESS_Update(curTime - timer);
+    timer = curTime;
+
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
-    renderTextBuffer(textBuffer, renderer, font, TextBeginX, TextBeginY, lineSpace);
-    renderCursor(renderer, font, TextBeginX + cursorX * TTF_FontHeight(font) / 2.0f,
-                 TextBeginY + cursorY * (TTF_FontHeight(font) + lineSpace));
+    float panelX = TextBeginX + textPanelBiasX;
+    float panelY = TextBeginY + textPanelBiasY;
+    float cursorPosX, cursorPosY;
+    moveCursor(&cursorPosX, &cursorPosY, font);
+
+    renderTextBuffer(textBuffer, renderer, font, panelX, panelY, lineSpace);
+    renderCursor(renderer, font, cursorPosX, cursorPosY);
 
     SDL_RenderPresent(renderer);
   }
