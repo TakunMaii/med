@@ -82,7 +82,7 @@ void fallbackKeyProcess(Key key)
     if(!isPrintable(key.sym))return;
     char keyPressed = key.sym;
     if (key.mod & KMOD_SHIFT) {
-      keyPressed = toupper(key.sym);
+      keyPressed = toUpper(key.sym);
     }
     insertCharAt(textBuffer, cursorY, cursorX, keyPressed);
     cursorX++;
@@ -121,6 +121,10 @@ void processKeyEvent(SDL_Event event)
       cursorY--;
       if (cursorY < 0) {
           cursorY = 0;
+      }
+      if(cursorX > strlen(textBuffer->lines[cursorY]->content))
+      {
+        cursorX = strlen(textBuffer->lines[cursorY]->content);
       }
   } else if (event.key.keysym.sym == SDLK_DOWN) {
       cursorY++;

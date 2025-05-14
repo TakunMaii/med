@@ -45,6 +45,8 @@ void registerKeyFallbackProcess(void (*process)(Key key));
 
 bool isPrintable(int key);
 
+char toUpper(char c);
+
 bool keyEqual(Key key1, Key key2);
 
 KeyChain str2KeyChain(const char *str);

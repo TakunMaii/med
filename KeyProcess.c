@@ -1,4 +1,5 @@
 #include "KeyProcess.h"
+#include <SDL2/SDL_config_unix.h>
 
 const float KEY_WAITING_TIME = 1.0f;
 float keyTimer = 0.0f;
@@ -17,6 +18,38 @@ void keyStartWait()
 {
     keyWaiting = true;
     keyTimer = 0.0f;
+}
+
+char toUpper(char c)
+{
+    if (c >= 'a' && c <= 'z')
+    {
+        return c - 32;
+    }
+    switch (c) {
+        case '`': return '~';
+        case '1': return '!';
+        case '2': return '@';
+        case '3': return '#';
+        case '4': return '$';
+        case '5': return '%';
+        case '6': return '^';
+        case '7': return '&';
+        case '8': return '*';
+        case '9': return '(';
+        case '0': return ')';
+        case '-': return '_';
+        case '=': return '+';
+        case '[': return '{';
+        case ']': return '}';
+        case '\\': return '|';
+        case ';': return ':';
+        case '\'': return '"';
+        case ',': return '<';
+        case '.': return '>';
+        case '/': return '?';
+        default: return c;
+    }
 }
 
 void fallBackAllKeys()
