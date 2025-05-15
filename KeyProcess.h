@@ -3,6 +3,7 @@
 
 #include <SDL2/SDL_keyboard.h>
 #include <stdbool.h>
+#include "Mode.h"
 #include <SDL2/SDL_keycode.h>
 
 typedef struct
@@ -24,6 +25,7 @@ typedef struct
 {
     KeyChain chain;
     KeyCallback callback;
+    int modes;
 } KeyBinding;
 
 
@@ -39,7 +41,7 @@ void pushKey(SDL_Keysym sdlkey);
 
 void popKey(int num);
 
-void registerKeyBinding(KeyChain chain, KeyCallback callback);
+void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes);
 
 void registerKeyFallbackProcess(void (*process)(Key key));
 
@@ -53,10 +55,10 @@ KeyChain str2KeyChain(const char *str);
 
 bool halfMatchKeyChain(KeyChain *chain);
 
-bool halfMatchAny();
+bool halfMatchAny(enum Mode theMode);
 
 bool matchKeyChain(KeyChain *chain);
 
-void processKey(SDL_Keysym sdlkey, bool *halt);
+void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode);
 
 #endif // KEYPROSESS_H

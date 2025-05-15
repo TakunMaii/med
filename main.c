@@ -1,4 +1,5 @@
 #include "KeyProcess.h"
+#include "Mode.h"
 #include "TextBuffer.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -8,6 +9,7 @@
 #include <SDL2/SDL_video.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <threads.h>
 
 #define WINDOW_WIDTH 640
 #define WINDOW_HEIGHT 480
@@ -22,6 +24,7 @@ float timer = 0;
 const int lineSpace = 5;
 const int TextBeginX = 10;
 const int TextBeginY = 10;
+enum Mode theMode = MODE_NORMAL;
 
 void checkptr(void *ptr) {
 	if (ptr == NULL) {
@@ -77,31 +80,89 @@ void renderCursor(SDL_Renderer *renderer, TTF_Font *font, float x, float y) {
 	SDL_RenderFillRect(renderer, &rect);
 }
 
+void moveCursorUp() {
+	cursorY--;
+	if (cursorY < 0) {
+		cursorY = 0;
+	}
+	if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
+		cursorX = strlen(textBuffer->lines[cursorY]->content);
+	}
+}
+
+void moveCursorDown() {
+	cursorY++;
+	if (cursorY > textBuffer->line_count - 1) {
+		cursorY = textBuffer->line_count - 1;
+	}
+	if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
+		cursorX = strlen(textBuffer->lines[cursorY]->content);
+	}
+}
+
+void moveCursorLeft() {
+	cursorX--;
+	if (cursorX < 0 && cursorY > 0) {
+		cursorY--;
+		cursorX = strlen(textBuffer->lines[cursorY]->content);
+	} else if (cursorX < 0) {
+		cursorX = 0;
+	}
+}
+
+void moveCursorRight() {
+	cursorX++;
+	if (cursorX > strlen(textBuffer->lines[cursorY]->content) && cursorY < textBuffer->line_count - 1) {
+		cursorX = 0;
+		cursorY++;
+	} else if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
+		cursorX = strlen(textBuffer->lines[cursorY]->content);
+	}
+}
+
 void fallbackKeyProcess(Key key) {
 	if (!isPrintable(key.sym)) {
 		return;
 	}
-	char keyPressed = key.sym;
-	if (key.mod & KMOD_SHIFT) {
-		keyPressed = toUpper(key.sym);
+	if (theMode == MODE_NORMAL) {
+		if (key.sym == SDLK_i) {
+			theMode = MODE_INSERT;
+		} else if (key.sym == SDLK_j) {
+			moveCursorDown();
+		} else if (key.sym == SDLK_k) {
+			moveCursorUp();
+		} else if (key.sym == SDLK_h) {
+			moveCursorLeft();
+		} else if (key.sym == SDLK_l) {
+			moveCursorRight();
+		}
+	} else if (theMode == MODE_INSERT) {
+		char keyPressed = key.sym;
+		if (key.mod & KMOD_SHIFT) {
+			keyPressed = toUpper(key.sym);
+		}
+		insertCharAt(textBuffer, cursorY, cursorX, keyPressed);
+		cursorX++;
 	}
-	insertCharAt(textBuffer, cursorY, cursorX, keyPressed);
-	cursorX++;
 }
 
 void test() {
-	printf("test\n");
+    theMode = MODE_NORMAL;
 }
 
 void processKeyInit() {
 	registerKeyFallbackProcess(fallbackKeyProcess);
 	KeyChain keychain = str2KeyChain("jj");
-	registerKeyBinding(keychain, test);
+	registerKeyBinding(keychain, test, MODE_INSERT);
 }
 
 void processKeyEvent(SDL_Event event) {
 	if (event.key.keysym.sym == SDLK_ESCAPE) {
-		quit = true;
+		if (theMode != MODE_NORMAL) {
+			theMode = MODE_NORMAL;
+		} else {
+			quit = true;
+		}
 	} else if (event.key.keysym.sym == SDLK_BACKSPACE) {
 		if (cursorX > 0) {
 			deleteCharAt(textBuffer, cursorY, cursorX - 1);
@@ -115,37 +176,13 @@ void processKeyEvent(SDL_Event event) {
 			cursorX = x;
 		}
 	} else if (event.key.keysym.sym == SDLK_UP) {
-		cursorY--;
-		if (cursorY < 0) {
-			cursorY = 0;
-		}
-		if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
-			cursorX = strlen(textBuffer->lines[cursorY]->content);
-		}
+		moveCursorUp();
 	} else if (event.key.keysym.sym == SDLK_DOWN) {
-		cursorY++;
-		if (cursorY > textBuffer->line_count - 1) {
-			cursorY = textBuffer->line_count - 1;
-		}
-		if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
-			cursorX = strlen(textBuffer->lines[cursorY]->content);
-		}
+		moveCursorDown();
 	} else if (event.key.keysym.sym == SDLK_LEFT) {
-		cursorX--;
-		if (cursorX < 0 && cursorY > 0) {
-			cursorY--;
-			cursorX = strlen(textBuffer->lines[cursorY]->content);
-		} else if (cursorX < 0) {
-			cursorX = 0;
-		}
+		moveCursorLeft();
 	} else if (event.key.keysym.sym == SDLK_RIGHT) {
-		cursorX++;
-		if (cursorX > strlen(textBuffer->lines[cursorY]->content) && cursorY < textBuffer->line_count - 1) {
-			cursorX = 0;
-			cursorY++;
-		} else if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
-			cursorX = strlen(textBuffer->lines[cursorY]->content);
-		}
+		moveCursorRight();
 	} else if (event.key.keysym.sym == SDLK_RETURN) {
 		const char *restLine = textBuffer->lines[cursorY]->content + cursorX;
 		insertNewLineAt(textBuffer, cursorY + 1, restLine);
@@ -154,7 +191,7 @@ void processKeyEvent(SDL_Event event) {
 		cursorY++;
 	} else {
 		bool halt;
-		processKey(event.key.keysym, &halt);
+		processKey(event.key.keysym, &halt, theMode);
 	}
 }
 

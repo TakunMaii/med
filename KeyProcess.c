@@ -1,4 +1,5 @@
 #include "KeyProcess.h"
+#include "Mode.h"
 #include <SDL2/SDL_config_unix.h>
 
 const float KEY_WAITING_TIME = 1.0f;
@@ -120,10 +121,11 @@ void popKey(int num) {
 	}
 }
 
-void registerKeyBinding(KeyChain chain, KeyCallback callback) {
+void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes) {
 	if (_keyBindingCount < 128) {
 		_keyBindings[_keyBindingCount].chain = chain;
 		_keyBindings[_keyBindingCount].callback = callback;
+        _keyBindings[_keyBindingCount].modes = modes;
 		_keyBindingCount++;
 	} else {
 		printf("ERR: trying to register more key bindings than allowed\n");
@@ -167,8 +169,11 @@ bool halfMatchKeyChain(KeyChain *chain) {
 	return true;
 }
 
-bool halfMatchAny() {
+bool halfMatchAny(enum Mode theMode) {
 	for (int i = 0; i < _keyBindingCount; i++) {
+        if (!(_keyBindings[i].modes & theMode)){
+            continue;
+        }
 		if (halfMatchKeyChain(&_keyBindings[i].chain)) {
 			return true;
 		}
@@ -188,9 +193,9 @@ bool matchKeyChain(KeyChain *chain) {
 	return true;
 }
 
-void processKey(SDL_Keysym sdlkey, bool *halt) {
+void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode) {
 	pushKey(sdlkey);
-	if (halfMatchAny()) {
+	if (halfMatchAny(theMode)) {
 		for (int i = 0; i < _keyBindingCount; i++) {
 			if (matchKeyChain(&_keyBindings[i].chain)) {
 				_keyBindings[i].callback();
