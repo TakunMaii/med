@@ -1,10 +1,13 @@
 #include "KeyProcess.h"
 #include "Mode.h"
+#include "PanelManagement.h"
 #include "TextBuffer.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
+#include <SDL2/SDL_rect.h>
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_surface.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_video.h>
 #include <stdbool.h>
@@ -22,9 +25,11 @@ float textPanelBiasX = 0;
 float textPanelBiasY = 0;
 float timer = 0;
 const int lineSpace = 5;
-const int TextBeginX = 10;
-const int TextBeginY = 10;
 enum Mode theMode = MODE_NORMAL;
+
+const Panel lineNumberPanel = { 0, 0, 35, WINDOW_HEIGHT - 50 };
+const Panel statusBarPanel = { 0, WINDOW_HEIGHT - 50, WINDOW_WIDTH, 50 };
+const Panel textPanel = { 35, 0, WINDOW_WIDTH - 35, WINDOW_HEIGHT - 50 };
 
 void checkptr(void *ptr) {
 	if (ptr == NULL) {
@@ -41,7 +46,7 @@ void checkstatus(int status) {
 }
 
 void renderText(const char *text, SDL_Renderer *renderer, TTF_Font *font,
-		float x, float y) {
+		float x, float y, SDL_Rect *clipRect) {
 	if (strlen(text) == 0) {
 		return;
 	}
@@ -56,18 +61,41 @@ void renderText(const char *text, SDL_Renderer *renderer, TTF_Font *font,
 	dstrect.w = surface->w;
 	dstrect.h = surface->h;
 	SDL_FreeSurface(surface);
+	SDL_RenderSetClipRect(renderer, clipRect);
 	SDL_RenderCopy(renderer, texture, NULL, &dstrect);
 	SDL_DestroyTexture(texture);
 }
 
 void renderTextBuffer(TextBuffer *textBuffer, SDL_Renderer *renderer,
-		TTF_Font *font, float x, float y, float lineSpace) {
+		TTF_Font *font, float lineSpace) {
+	float x = textPanel.posX + textPanelBiasX;
+	float y = textPanel.posY + textPanelBiasY;
 	float curY = y;
 	for (int i = 0; i < textBuffer->line_count; i++) {
 		char *line = textBuffer->lines[i]->content;
-		renderText(line, renderer, font, x, curY);
+		SDL_Rect clipRect = panel2ClipRect(textPanel);
+		renderText(line, renderer, font, x, curY, &clipRect);
 		curY += TTF_FontHeight(font) + lineSpace;
 	}
+}
+
+void renderLineNumber(TextBuffer *textBuffer, SDL_Renderer *renderer,
+		TTF_Font *font, float lineSpace) {
+	float x = lineNumberPanel.posX + textPanelBiasX;
+	float y = lineNumberPanel.posY + textPanelBiasY;
+	float curY = y;
+	for (int i = 0; i < textBuffer->line_count; i++) {
+		char lineNumber[10];
+		sprintf(lineNumber, "%d", i + 1);
+		SDL_Rect clipRect = panel2ClipRect(lineNumberPanel);
+		renderText(lineNumber, renderer, font, x, curY, &clipRect);
+		curY += TTF_FontHeight(font) + lineSpace;
+	}
+}
+
+void renderStatusBar(SDL_Renderer *renderer, TTF_Font *font) {
+	SDL_Rect clipRect = panel2ClipRect(statusBarPanel);
+	renderText(modeToString(theMode), renderer, font, statusBarPanel.posX, statusBarPanel.posY, &clipRect);
 }
 
 void renderCursor(SDL_Renderer *renderer, TTF_Font *font, float x, float y) {
@@ -77,6 +105,7 @@ void renderCursor(SDL_Renderer *renderer, TTF_Font *font, float x, float y) {
 	rect.y = y;
 	rect.w = TTF_FontHeight(font) / 10;
 	rect.h = TTF_FontHeight(font);
+	SDL_RenderSetClipRect(renderer, NULL);
 	SDL_RenderFillRect(renderer, &rect);
 }
 
@@ -147,7 +176,7 @@ void fallbackKeyProcess(Key key) {
 }
 
 void test() {
-    theMode = MODE_NORMAL;
+	theMode = MODE_NORMAL;
 }
 
 void processKeyInit() {
@@ -196,34 +225,33 @@ void processKeyEvent(SDL_Event event) {
 }
 
 void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font) {
-	*cursorPosX = TextBeginX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
-	*cursorPosY = TextBeginY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
+	*cursorPosX = textPanel.posX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
+	*cursorPosY = textPanel.posY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
 
 	const float cursorPaddingX = 0.2f * TTF_FontHeight(font);
 	const float cursorPaddingY = 2.0f * TTF_FontHeight(font);
 
-    //if the cursor is out of the window, move the text panel
-	if (*cursorPosX < cursorPaddingX) {
-		textPanelBiasX += cursorPaddingX - *cursorPosX;
-	} else if (*cursorPosX > WINDOW_WIDTH - cursorPaddingX) {
-		textPanelBiasX += WINDOW_WIDTH - cursorPaddingX - *cursorPosX;
+	//if the cursor is out of the window, move the text panel
+	if (*cursorPosX - textPanel.posX < cursorPaddingX) {
+		textPanelBiasX += cursorPaddingX - *cursorPosX + textPanel.posX;
+	} else if (*cursorPosX - textPanel.posX > textPanel.width - cursorPaddingX) {
+		textPanelBiasX += textPanel.width - cursorPaddingX - *cursorPosX + textPanel.posX;
 	}
 
-	if (*cursorPosY < cursorPaddingY) {
-		textPanelBiasY += cursorPaddingY - *cursorPosY;
-	} else if (*cursorPosY > WINDOW_HEIGHT - cursorPaddingY) {
-		textPanelBiasY += WINDOW_HEIGHT - cursorPaddingY - *cursorPosY;
+	if (*cursorPosY - textPanel.posY < cursorPaddingY) {
+		textPanelBiasY += cursorPaddingY - *cursorPosY + textPanel.posY;
+	} else if (*cursorPosY - textPanel.posY > textPanel.height - cursorPaddingY) {
+		textPanelBiasY += textPanel.height - cursorPaddingY - *cursorPosY + textPanel.posY;
 	}
 
-    //if the text penel is too low, move it up
-    //this may happen when the cursor is at the top lines of the text
-    if(textPanelBiasY > 0)
-    {
-        textPanelBiasY = 0;
-    }
+	//if the text penel is too low, move it up
+	//this may happen when the cursor is at the top lines of the text
+	if (textPanelBiasY > 0) {
+		textPanelBiasY = 0;
+	}
 
-	*cursorPosX = TextBeginX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
-	*cursorPosY = TextBeginY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
+	*cursorPosX = textPanel.posX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
+	*cursorPosY = textPanel.posY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
 }
 
 int main(int argc, char *argv[]) {
@@ -271,13 +299,15 @@ int main(int argc, char *argv[]) {
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 		SDL_RenderClear(renderer);
 
-		float panelX = TextBeginX + textPanelBiasX;
-		float panelY = TextBeginY + textPanelBiasY;
+		float panelX = textPanel.posX + textPanelBiasX;
+		float panelY = textPanel.posY + textPanelBiasY;
 		float cursorPosX, cursorPosY;
 		moveCursor(&cursorPosX, &cursorPosY, font);
 
-		renderTextBuffer(textBuffer, renderer, font, panelX, panelY, lineSpace);
+		renderTextBuffer(textBuffer, renderer, font, lineSpace);
+		renderLineNumber(textBuffer, renderer, font, lineSpace);
 		renderCursor(renderer, font, cursorPosX, cursorPosY);
+		renderStatusBar(renderer, font);
 
 		SDL_RenderPresent(renderer);
 	}
