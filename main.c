@@ -94,8 +94,20 @@ void renderLineNumber(TextBuffer *textBuffer, SDL_Renderer *renderer,
 }
 
 void renderStatusBar(SDL_Renderer *renderer, TTF_Font *font) {
+    const char *modestr = modeToString(theMode);
+    char bufferstr[20];
+    int bufferlen = 0;
+    for(int i = 0;i<getKeyBufferIndex();i++)
+    {
+        bufferstr[bufferlen++] = getKeyBuffer()[i].sym;
+    }
+    bufferstr[bufferlen] = '\0';
+
+    char statusBarText[100];
+    sprintf(statusBarText, "%s | Buffer: %s", modestr, bufferstr);
+
 	SDL_Rect clipRect = panel2ClipRect(statusBarPanel);
-	renderText(modeToString(theMode), renderer, font, statusBarPanel.posX, statusBarPanel.posY, &clipRect);
+	renderText(statusBarText, renderer, font, statusBarPanel.posX, statusBarPanel.posY, &clipRect);
 }
 
 void renderCursor(SDL_Renderer *renderer, TTF_Font *font, float x, float y) {
@@ -149,11 +161,70 @@ void moveCursorRight() {
 	}
 }
 
+bool isLetter(char c) {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
+}
+
+bool isStartOfWordNow() {
+	return isLetter(GetCharAt(textBuffer, cursorY, cursorX)) &&
+			(cursorX == 0 || !isLetter(GetCharAt(textBuffer, cursorY, cursorX - 1)));
+}
+
+bool isEndOfWordNow() {
+	return isLetter(GetCharAt(textBuffer, cursorY, cursorX)) &&
+			(cursorX == strlen(textBuffer->lines[cursorY]->content) - 1 ||
+					!isLetter(GetCharAt(textBuffer, cursorY, cursorX + 1)));
+}
+
+bool isAtEndOfTextBuffer() {
+	return cursorY == textBuffer->line_count - 1 && cursorX == strlen(textBuffer->lines[cursorY]->content);
+}
+
+bool isAtStartOfTextBuffer() {
+	return cursorY == 0 && cursorX == 0;
+}
+
+void moveCursorLeftWord() {
+	if (isAtStartOfTextBuffer()) {
+		return;
+	}
+	if (isStartOfWordNow()) {
+		moveCursorLeft();
+	}
+	while (!isStartOfWordNow() && !isAtStartOfTextBuffer()) {
+		moveCursorLeft();
+	}
+}
+
+void moveCursorRightWord() {
+	if (isAtEndOfTextBuffer()) {
+		return;
+	}
+	if (isStartOfWordNow()) {
+		moveCursorRight();
+	}
+	while (!isStartOfWordNow() && !isAtEndOfTextBuffer()) {
+		moveCursorRight();
+	}
+}
+
+void moveCursorToEndofWord() {
+	if (isAtEndOfTextBuffer()) {
+		return;
+	}
+	if (isEndOfWordNow()) {
+		moveCursorRight();
+	}
+	while (!isEndOfWordNow() && !isAtEndOfTextBuffer()) {
+		moveCursorRight();
+	}
+}
+
 void fallbackKeyProcess(Key key) {
 	if (!isPrintable(key.sym)) {
 		return;
 	}
-	if (theMode == MODE_NORMAL) {
+	if (theMode & (MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE)) {
 		if (key.sym == SDLK_i) {
 			theMode = MODE_INSERT;
 		} else if (key.sym == SDLK_j) {
@@ -164,6 +235,12 @@ void fallbackKeyProcess(Key key) {
 			moveCursorLeft();
 		} else if (key.sym == SDLK_l) {
 			moveCursorRight();
+		} else if (key.sym == SDLK_w) {
+			moveCursorRightWord();
+		} else if (key.sym == SDLK_b) {
+			moveCursorLeftWord();
+		} else if (key.sym == SDLK_e) {
+			moveCursorToEndofWord();
 		}
 	} else if (theMode == MODE_INSERT) {
 		char keyPressed = key.sym;
@@ -181,8 +258,18 @@ void test() {
 
 void processKeyInit() {
 	registerKeyFallbackProcess(fallbackKeyProcess);
-	KeyChain keychain = str2KeyChain("jj");
-	registerKeyBinding(keychain, test, MODE_INSERT);
+	{
+		KeyChain keychain = str2KeyChain("jj");
+		registerKeyBinding(keychain, test, MODE_INSERT);
+	}
+
+	for (char c = 33; c < 127; c++) {
+		char str[16];
+		sprintf(str, "f%c", c);
+		KeyChain chain = str2KeyChain(str);
+        int kk = c;
+		registerKeyBinding(chain, test, MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE);
+	}
 }
 
 void processKeyEvent(SDL_Event event) {
@@ -219,7 +306,7 @@ void processKeyEvent(SDL_Event event) {
 		cursorX = 0;
 		cursorY++;
 	} else {
-		bool halt;
+		bool halt = false;
 		processKey(event.key.keysym, &halt, theMode);
 	}
 }

@@ -41,4 +41,6 @@ char *wholeText(TextBuffer *textBuffer);
 
 void deleteLineAt(TextBuffer *textBuffer, int lineIndex);
 
+char GetCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex);
+
 #endif// TEXT_BUFFER_H

@@ -1,6 +1,7 @@
 #include "KeyProcess.h"
 #include "Mode.h"
 #include <SDL2/SDL_config_unix.h>
+#include <stdio.h>
 
 const float KEY_WAITING_TIME = 1.0f;
 float keyTimer = 0.0f;
@@ -10,7 +11,7 @@ bool keyWaiting = false;
 Key _keyBuffer[16] = { 0 };
 int _keyBufferIndex = 0;
 
-KeyBinding _keyBindings[128] = { 0 };
+KeyBinding _keyBindings[256] = { 0 };
 int _keyBindingCount = 0;
 
 void (*keyFallbackProcess)(Key key) = NULL;
@@ -18,6 +19,14 @@ void (*keyFallbackProcess)(Key key) = NULL;
 void keyStartWait() {
 	keyWaiting = true;
 	keyTimer = 0.0f;
+}
+
+int getKeyBufferIndex() {
+	return _keyBufferIndex;
+}
+
+Key *getKeyBuffer() {
+	return _keyBuffer;
 }
 
 char toUpper(char c) {
@@ -122,13 +131,14 @@ void popKey(int num) {
 }
 
 void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes) {
-	if (_keyBindingCount < 128) {
+	if (_keyBindingCount < 256) {
 		_keyBindings[_keyBindingCount].chain = chain;
 		_keyBindings[_keyBindingCount].callback = callback;
-        _keyBindings[_keyBindingCount].modes = modes;
+		_keyBindings[_keyBindingCount].modes = modes;
 		_keyBindingCount++;
 	} else {
 		printf("ERR: trying to register more key bindings than allowed\n");
+		exit(1);
 	}
 }
 
@@ -146,6 +156,7 @@ bool keyEqual(Key key1, Key key2) {
 
 KeyChain str2KeyChain(const char *str) {
 	KeyChain chain = { 0 };
+    chain.count = 0;
 	int i = 0;
 	while (str[i] != '\0' && i < 16) {
 		if (isPrintable(str[i])) {
@@ -162,7 +173,7 @@ KeyChain str2KeyChain(const char *str) {
 
 bool halfMatchKeyChain(KeyChain *chain) {
 	for (int i = 0; i < chain->count && i < _keyBufferIndex; i++) {
-		if (!keyEqual(chain->keys[i], _keyBuffer[_keyBufferIndex - i - 1])) {
+		if (!keyEqual(chain->keys[i], _keyBuffer[i])) {
 			return false;
 		}
 	}
@@ -171,9 +182,9 @@ bool halfMatchKeyChain(KeyChain *chain) {
 
 bool halfMatchAny(enum Mode theMode) {
 	for (int i = 0; i < _keyBindingCount; i++) {
-        if (!(_keyBindings[i].modes & theMode)){
-            continue;
-        }
+		if (!(_keyBindings[i].modes & theMode)) {
+			continue;
+		}
 		if (halfMatchKeyChain(&_keyBindings[i].chain)) {
 			return true;
 		}
@@ -181,12 +192,12 @@ bool halfMatchAny(enum Mode theMode) {
 	return false;
 }
 
-bool matchKeyChain(KeyChain *chain) {
-	if (chain->count > _keyBufferIndex) {
+bool matchKeyChain(KeyChain chain) {
+	if (chain.count > _keyBufferIndex) {
 		return false;
 	}
-	for (int i = 0; i < chain->count; i++) {
-		if (!keyEqual(chain->keys[i], _keyBuffer[_keyBufferIndex - i - 1])) {
+	for (int i = 0; i < chain.count; i++) {
+		if (!keyEqual(chain.keys[i], _keyBuffer[i])) {
 			return false;
 		}
 	}
@@ -197,13 +208,17 @@ void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode) {
 	pushKey(sdlkey);
 	if (halfMatchAny(theMode)) {
 		for (int i = 0; i < _keyBindingCount; i++) {
-			if (matchKeyChain(&_keyBindings[i].chain)) {
+			if (!(theMode & _keyBindings[i].modes)) {
+				continue;
+			}
+			if (matchKeyChain(_keyBindings[i].chain)) {
 				_keyBindings[i].callback();
 				popKey(_keyBindings[i].chain.count);
 				*halt = true;
 				return;
 			}
 		}
+        
 		*halt = false;
 		keyStartWait();
 		return;

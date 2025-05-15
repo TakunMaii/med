@@ -14,8 +14,8 @@ typedef struct
 
 typedef struct
 {
-    Key keys[16];
     int count;
+    Key keys[16];
 } KeyChain;
 // KeyChain is a list of keys pressed in order
 
@@ -30,6 +30,10 @@ typedef struct
 
 
 void keyStartWait();
+
+Key* getKeyBuffer();
+
+int getKeyBufferIndex();
 
 void fallBackAllKeys();
 
@@ -57,7 +61,7 @@ bool halfMatchKeyChain(KeyChain *chain);
 
 bool halfMatchAny(enum Mode theMode);
 
-bool matchKeyChain(KeyChain *chain);
+bool matchKeyChain(KeyChain chain);
 
 void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode);
 

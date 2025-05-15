@@ -181,3 +181,28 @@ void deleteLineAt(TextBuffer *textBuffer, int lineIndex) {
 	textBuffer->line_count--;
 	releaseLineBuffer(line);
 }
+
+char GetCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex)
+{
+    if (lineIndex >= textBuffer->line_count) {
+        printf("ERR: Line index out of bounds\n");
+        return '\0'; // Line index out of bounds
+    }
+
+    if (lineIndex < 0) {
+        printf("ERR: Line index out of bounds\n");
+        return '\0'; // Line index out of bounds
+    }
+
+    if (charIndex > strlen(textBuffer->lines[lineIndex]->content)) {
+        printf("ERR: Char index out of bounds\n");
+        return '\0'; // Char index out of bounds
+    }
+
+    if (charIndex < 0) {
+        printf("ERR: Char index out of bounds\n");
+        return '\0'; // Char index out of bounds
+    }
+
+    return textBuffer->lines[lineIndex]->content[charIndex];
+}
