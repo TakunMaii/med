@@ -202,6 +202,7 @@ void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font) {
 	const float cursorPaddingX = 0.2f * TTF_FontHeight(font);
 	const float cursorPaddingY = 2.0f * TTF_FontHeight(font);
 
+    //if the cursor is out of the window, move the text panel
 	if (*cursorPosX < cursorPaddingX) {
 		textPanelBiasX += cursorPaddingX - *cursorPosX;
 	} else if (*cursorPosX > WINDOW_WIDTH - cursorPaddingX) {
@@ -213,6 +214,13 @@ void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font) {
 	} else if (*cursorPosY > WINDOW_HEIGHT - cursorPaddingY) {
 		textPanelBiasY += WINDOW_HEIGHT - cursorPaddingY - *cursorPosY;
 	}
+
+    //if the text penel is too low, move it up
+    //this may happen when the cursor is at the top lines of the text
+    if(textPanelBiasY > 0)
+    {
+        textPanelBiasY = 0;
+    }
 
 	*cursorPosX = TextBeginX + textPanelBiasX + cursorX * TTF_FontHeight(font) / 2.0f;
 	*cursorPosY = TextBeginY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
