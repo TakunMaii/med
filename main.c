@@ -1,3 +1,4 @@
+#include "FKeyFunc.h"
 #include "KeyProcess.h"
 #include "Mode.h"
 #include "PanelManagement.h"
@@ -94,17 +95,16 @@ void renderLineNumber(TextBuffer *textBuffer, SDL_Renderer *renderer,
 }
 
 void renderStatusBar(SDL_Renderer *renderer, TTF_Font *font) {
-    const char *modestr = modeToString(theMode);
-    char bufferstr[20];
-    int bufferlen = 0;
-    for(int i = 0;i<getKeyBufferIndex();i++)
-    {
-        bufferstr[bufferlen++] = getKeyBuffer()[i].sym;
-    }
-    bufferstr[bufferlen] = '\0';
+	const char *modestr = modeToString(theMode);
+	char bufferstr[20];
+	int bufferlen = 0;
+	for (int i = 0; i < getKeyBufferIndex(); i++) {
+		bufferstr[bufferlen++] = getKeyBuffer()[i].sym;
+	}
+	bufferstr[bufferlen] = '\0';
 
-    char statusBarText[100];
-    sprintf(statusBarText, "%s | Buffer: %s", modestr, bufferstr);
+	char statusBarText[100];
+	sprintf(statusBarText, "%s | Buffer: %s", modestr, bufferstr);
 
 	SDL_Rect clipRect = panel2ClipRect(statusBarPanel);
 	renderText(statusBarText, renderer, font, statusBarPanel.posX, statusBarPanel.posY, &clipRect);
@@ -158,6 +158,13 @@ void moveCursorRight() {
 		cursorY++;
 	} else if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
 		cursorX = strlen(textBuffer->lines[cursorY]->content);
+	}
+}
+
+void cursorFind(char c) {
+	while (GetCharAt(textBuffer, cursorY, cursorX) != c &&
+			cursorX < strlen(textBuffer->lines[cursorY]->content)) {
+		cursorX++;
 	}
 }
 
@@ -256,20 +263,17 @@ void test() {
 	theMode = MODE_NORMAL;
 }
 
+// define f key functions here
+DEF_F_KEY_FUNCS
+
 void processKeyInit() {
 	registerKeyFallbackProcess(fallbackKeyProcess);
 	{
 		KeyChain keychain = str2KeyChain("jj");
 		registerKeyBinding(keychain, test, MODE_INSERT);
 	}
-
-	for (char c = 33; c < 127; c++) {
-		char str[16];
-		sprintf(str, "f%c", c);
-		KeyChain chain = str2KeyChain(str);
-        int kk = c;
-		registerKeyBinding(chain, test, MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE);
-	}
+	//register f key functions here
+	F_KEY_FUNC_REGISTER
 }
 
 void processKeyEvent(SDL_Event event) {
