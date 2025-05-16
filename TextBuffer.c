@@ -1,4 +1,6 @@
 #include "TextBuffer.h"
+#include "Mode.h"
+#include "Common.h"
 
 LineBuffer *createLineBuffer() {
 	LineBuffer *line = (LineBuffer *)malloc(sizeof(LineBuffer));
@@ -182,27 +184,53 @@ void deleteLineAt(TextBuffer *textBuffer, int lineIndex) {
 	releaseLineBuffer(line);
 }
 
-char GetCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex)
-{
-    if (lineIndex >= textBuffer->line_count) {
-        printf("ERR: Line index out of bounds\n");
-        return '\0'; // Line index out of bounds
-    }
+char GetCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex) {
+	if (lineIndex >= textBuffer->line_count) {
+		printf("ERR: Line index out of bounds\n");
+		return '\0'; // Line index out of bounds
+	}
 
-    if (lineIndex < 0) {
-        printf("ERR: Line index out of bounds\n");
-        return '\0'; // Line index out of bounds
-    }
+	if (lineIndex < 0) {
+		printf("ERR: Line index out of bounds\n");
+		return '\0'; // Line index out of bounds
+	}
 
-    if (charIndex > strlen(textBuffer->lines[lineIndex]->content)) {
-        printf("ERR: Char index out of bounds\n");
-        return '\0'; // Char index out of bounds
-    }
+	if (charIndex > strlen(textBuffer->lines[lineIndex]->content)) {
+		printf("ERR: Char index out of bounds\n");
+		return '\0'; // Char index out of bounds
+	}
 
-    if (charIndex < 0) {
-        printf("ERR: Char index out of bounds\n");
-        return '\0'; // Char index out of bounds
-    }
+	if (charIndex < 0) {
+		printf("ERR: Char index out of bounds\n");
+		return '\0'; // Char index out of bounds
+	}
 
-    return textBuffer->lines[lineIndex]->content[charIndex];
+	return textBuffer->lines[lineIndex]->content[charIndex];
+}
+
+void deleteBetween(TextBuffer *textBuffer, int x1, int y1, int x2, int y2, Mode mode) {
+	if (y1 > y2 || (y1 == y2 && x1 > x2)) {
+		swap(&x1, &x2);
+		swap(&y1, &y2);
+	}
+
+	if (mode == MODE_VISUAL) {
+		for (int i = y1 + 1; i < y2; i++) {
+			deleteLineAt(textBuffer, i);
+		}
+		strcpy(textBuffer->lines[y1]->content + x1, textBuffer->lines[y2]->content + x2);
+		deleteLineAt(textBuffer, y2);
+	} else if (mode == MODE_VISUAL_LINE) {
+		for (int i = y1; i <= y2; i++) {
+			deleteLineAt(textBuffer, y1);
+		}
+	} else if (mode == MODE_VISUAL_BLOCK) {
+        if(x1 > x2) {
+            swap(&x1, &x2);
+        }
+        for (int i = y1; i <= y2; i++) {
+            LineBuffer *line = textBuffer->lines[i];
+            memmove(line->content + x1, line->content + x2, strlen(line->content) - x2 + 1);
+        }
+    }
 }

@@ -3,7 +3,6 @@
 
 #define F_KEY_FUNC(key)       \
 	void _f##key() {          \
-		printf("f%c\n", key); \
         cursorFind(key);      \
 	}
 
@@ -107,7 +106,6 @@
 	{                                                                                                         \
 		char str[16];                                                                                         \
 		sprintf(str, "f%c", key);                                                                             \
-		printf("INFO: register %s\n", str);                                                                   \
 		KeyChain chain = str2KeyChain(str);                                                                   \
 		registerKeyBinding(chain, _f##key, MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE); \
 	}

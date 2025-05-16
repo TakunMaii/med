@@ -1,3 +1,4 @@
+#include "Common.h"
 #include "FKeyFunc.h"
 #include "KeyProcess.h"
 #include "Mode.h"
@@ -22,6 +23,8 @@ bool quit = false;
 TextBuffer *textBuffer;
 int cursorX = 0;
 int cursorY = 0;
+int pairCursorX = 0;
+int pairCursorY = 0;
 float textPanelBiasX = 0;
 float textPanelBiasY = 0;
 float timer = 0;
@@ -121,6 +124,67 @@ void renderCursor(SDL_Renderer *renderer, TTF_Font *font, float x, float y) {
 	SDL_RenderFillRect(renderer, &rect);
 }
 
+void renderSelectedText(SDL_Renderer *renderer, TTF_Font *font) {
+	SDL_SetRenderDrawColor(renderer, 0, 105, 15, 125);
+	SDL_RenderSetClipRect(renderer, NULL);
+
+	if (theMode == MODE_VISUAL) {
+		int x1 = cursorX, y1 = cursorY;
+		int x2 = pairCursorX, y2 = pairCursorY;
+		if (y1 > y2 || (y1 == y2 && x1 > x2)) {
+			swap(&x1, &x2);
+			swap(&y1, &y2);
+		}
+		for (int i = y1; i <= y2; i++) {
+			int startX = (i == y1) ? x1 : 0;
+			int endX = (i == y2) ? x2 : strlen(textBuffer->lines[i]->content);
+				SDL_Rect rect;
+				rect.x = textPanel.posX + textPanelBiasX + startX * TTF_FontHeight(font) / 2.0f;
+				rect.y = textPanel.posY + textPanelBiasY + i * (TTF_FontHeight(font) + lineSpace);
+				rect.w = (endX - startX) * TTF_FontHeight(font) / 2;
+				rect.h = TTF_FontHeight(font);
+				SDL_RenderFillRect(renderer, &rect);
+		}
+	} else if (theMode == MODE_VISUAL_BLOCK) {
+		int x1 = cursorX, y1 = cursorY;
+		int x2 = pairCursorX, y2 = pairCursorY;
+		if (y1 > y2) {
+			swap(&y1, &y2);
+		}
+		if (x1 > x2) {
+			swap(&x1, &x2);
+		}
+		for (int i = y1; i <= y2; i++) {
+			int linelen = strlen(textBuffer->lines[i]->content);
+			if (x1 > linelen) {
+				continue;
+			}
+			int startX = x1;
+			int endX = (x2 < linelen) ? x2 : linelen;
+			SDL_Rect rect;
+			rect.x = textPanel.posX + textPanelBiasX + startX * TTF_FontHeight(font) / 2.0f;
+			rect.y = textPanel.posY + textPanelBiasY + i * (TTF_FontHeight(font) + lineSpace);
+			rect.w = (endX - startX) * TTF_FontHeight(font) / 2;
+			rect.h = TTF_FontHeight(font);
+			SDL_RenderFillRect(renderer, &rect);
+		}
+	} else if (theMode == MODE_VISUAL_LINE) {
+		int x1 = cursorX, y1 = cursorY;
+		int x2 = pairCursorX, y2 = pairCursorY;
+		if (y1 > y2) {
+			swap(&y1, &y2);
+		}
+		for (int i = y1; i <= y2; i++) {
+			SDL_Rect rect;
+			rect.x = textPanel.posX + textPanelBiasX;
+			rect.y = textPanel.posY + textPanelBiasY + i * (TTF_FontHeight(font) + lineSpace);
+			rect.w = textPanel.width;
+			rect.h = TTF_FontHeight(font);
+			SDL_RenderFillRect(renderer, &rect);
+		}
+	}
+}
+
 void moveCursorUp() {
 	cursorY--;
 	if (cursorY < 0) {
@@ -162,6 +226,12 @@ void moveCursorRight() {
 }
 
 void cursorFind(char c) {
+	if (cursorX >= strlen(textBuffer->lines[cursorY]->content)) {
+		return;
+	}
+	if (GetCharAt(textBuffer, cursorY, cursorX) == c) {
+		cursorX++;
+	}
 	while (GetCharAt(textBuffer, cursorY, cursorX) != c &&
 			cursorX < strlen(textBuffer->lines[cursorY]->content)) {
 		cursorX++;
@@ -248,7 +318,28 @@ void fallbackKeyProcess(Key key) {
 			moveCursorLeftWord();
 		} else if (key.sym == SDLK_e) {
 			moveCursorToEndofWord();
-		}
+		} else if (theMode == MODE_NORMAL) {
+			if (key.sym == SDLK_v) {
+				if (key.mod & KMOD_CTRL) {
+					theMode = MODE_VISUAL_BLOCK;
+                    pairCursorX = cursorX;
+                    pairCursorY = cursorY;
+				} else if (key.mod & KMOD_SHIFT) {
+					theMode = MODE_VISUAL_LINE;
+                    pairCursorX = cursorX;
+                    pairCursorY = cursorY;
+				} else {
+					theMode = MODE_VISUAL;
+                    pairCursorX = cursorX;
+                    pairCursorY = cursorY;
+				}
+			}
+        } else {
+            if (key.sym == SDLK_d){
+                deleteBetween(textBuffer, cursorX, cursorY, pairCursorX, pairCursorY, theMode);
+                theMode = MODE_NORMAL;
+            }
+        }
 	} else if (theMode == MODE_INSERT) {
 		char keyPressed = key.sym;
 		if (key.mod & KMOD_SHIFT) {
@@ -394,6 +485,10 @@ int main(int argc, char *argv[]) {
 		float panelY = textPanel.posY + textPanelBiasY;
 		float cursorPosX, cursorPosY;
 		moveCursor(&cursorPosX, &cursorPosY, font);
+
+		if (theMode == MODE_VISUAL || theMode == MODE_VISUAL_BLOCK || theMode == MODE_VISUAL_LINE) {
+			renderSelectedText(renderer, font);
+		}
 
 		renderTextBuffer(textBuffer, renderer, font, lineSpace);
 		renderLineNumber(textBuffer, renderer, font, lineSpace);

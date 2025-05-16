@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "Mode.h"
 
 #define TEXT_BUFFER_MAX_LINES 256
 #define TEXT_BUFFER_MAX_LINE_LENGTH 256
@@ -42,5 +43,7 @@ char *wholeText(TextBuffer *textBuffer);
 void deleteLineAt(TextBuffer *textBuffer, int lineIndex);
 
 char GetCharAt(TextBuffer *textBuffer, int lineIndex, int charIndex);
+
+void deleteBetween(TextBuffer *textBuffer, int x1, int y1, int x2, int y2, Mode mode);
 
 #endif// TEXT_BUFFER_H
