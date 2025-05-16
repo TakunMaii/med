@@ -3,6 +3,7 @@
 #include "KeyProcess.h"
 #include "Mode.h"
 #include "PanelManagement.h"
+#include "Register.h"
 #include "TextBuffer.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -30,6 +31,8 @@ float textPanelBiasY = 0;
 float timer = 0;
 const int lineSpace = 5;
 enum Mode theMode = MODE_NORMAL;
+bool recording = false;
+char recordingReg = 'q';
 
 const Panel lineNumberPanel = { 0, 0, 35, WINDOW_HEIGHT - 50 };
 const Panel statusBarPanel = { 0, WINDOW_HEIGHT - 50, WINDOW_WIDTH, 50 };
@@ -107,7 +110,11 @@ void renderStatusBar(SDL_Renderer *renderer, TTF_Font *font) {
 	bufferstr[bufferlen] = '\0';
 
 	char statusBarText[100];
-	sprintf(statusBarText, "%s | Buffer: %s", modestr, bufferstr);
+	if (!recording) {
+		sprintf(statusBarText, "%s | %s", modestr, bufferstr);
+	} else {
+		sprintf(statusBarText, "@%c | %s | %s", recordingReg, modestr, bufferstr);
+	}
 
 	SDL_Rect clipRect = panel2ClipRect(statusBarPanel);
 	renderText(statusBarText, renderer, font, statusBarPanel.posX, statusBarPanel.posY, &clipRect);
@@ -138,12 +145,12 @@ void renderSelectedText(SDL_Renderer *renderer, TTF_Font *font) {
 		for (int i = y1; i <= y2; i++) {
 			int startX = (i == y1) ? x1 : 0;
 			int endX = (i == y2) ? x2 : strlen(textBuffer->lines[i]->content);
-				SDL_Rect rect;
-				rect.x = textPanel.posX + textPanelBiasX + startX * TTF_FontHeight(font) / 2.0f;
-				rect.y = textPanel.posY + textPanelBiasY + i * (TTF_FontHeight(font) + lineSpace);
-				rect.w = (endX - startX) * TTF_FontHeight(font) / 2;
-				rect.h = TTF_FontHeight(font);
-				SDL_RenderFillRect(renderer, &rect);
+			SDL_Rect rect;
+			rect.x = textPanel.posX + textPanelBiasX + startX * TTF_FontHeight(font) / 2.0f;
+			rect.y = textPanel.posY + textPanelBiasY + i * (TTF_FontHeight(font) + lineSpace);
+			rect.w = (endX - startX) * TTF_FontHeight(font) / 2;
+			rect.h = TTF_FontHeight(font);
+			SDL_RenderFillRect(renderer, &rect);
 		}
 	} else if (theMode == MODE_VISUAL_BLOCK) {
 		int x1 = cursorX, y1 = cursorY;
@@ -318,28 +325,34 @@ void fallbackKeyProcess(Key key) {
 			moveCursorLeftWord();
 		} else if (key.sym == SDLK_e) {
 			moveCursorToEndofWord();
+		} else if (key.sym == SDLK_q) {
+			recording = !recording;
+            if(recording)
+            {
+                clearRegister(recordingReg);
+            }
 		} else if (theMode == MODE_NORMAL) {
 			if (key.sym == SDLK_v) {
 				if (key.mod & KMOD_CTRL) {
 					theMode = MODE_VISUAL_BLOCK;
-                    pairCursorX = cursorX;
-                    pairCursorY = cursorY;
+					pairCursorX = cursorX;
+					pairCursorY = cursorY;
 				} else if (key.mod & KMOD_SHIFT) {
 					theMode = MODE_VISUAL_LINE;
-                    pairCursorX = cursorX;
-                    pairCursorY = cursorY;
+					pairCursorX = cursorX;
+					pairCursorY = cursorY;
 				} else {
 					theMode = MODE_VISUAL;
-                    pairCursorX = cursorX;
-                    pairCursorY = cursorY;
+					pairCursorX = cursorX;
+					pairCursorY = cursorY;
 				}
 			}
-        } else {
-            if (key.sym == SDLK_d){
-                deleteBetween(textBuffer, cursorX, cursorY, pairCursorX, pairCursorY, theMode);
-                theMode = MODE_NORMAL;
-            }
-        }
+		} else {
+			if (key.sym == SDLK_d) {
+				deleteBetween(textBuffer, cursorX, cursorY, pairCursorX, pairCursorY, theMode);
+				theMode = MODE_NORMAL;
+			}
+		}
 	} else if (theMode == MODE_INSERT) {
 		char keyPressed = key.sym;
 		if (key.mod & KMOD_SHIFT) {
@@ -400,8 +413,15 @@ void processKeyEvent(SDL_Event event) {
 		textBuffer->lines[cursorY]->content[cursorX] = '\0';
 		cursorX = 0;
 		cursorY++;
+	} else if (event.key.keysym.sym == SDLK_2 && event.key.keysym.mod & KMOD_SHIFT && theMode == MODE_NORMAL) {
+		bool halt = false;
+		execute_register('q', &halt, theMode);
 	} else {
 		bool halt = false;
+		if (recording && event.key.keysym.sym != SDLK_q) {
+			Key recordingKey = sdlKey2Key(event.key.keysym);
+			pushKeyToRegister(recordingReg, recordingKey);
+		}
 		processKey(event.key.keysym, &halt, theMode);
 	}
 }

@@ -2,13 +2,14 @@
 #include "Mode.h"
 #include <SDL2/SDL_config_unix.h>
 #include <stdio.h>
+#include <string.h>
 
 const float KEY_WAITING_TIME = 1.0f;
 float keyTimer = 0.0f;
 bool keyWaiting = false;
 
 // _keyBuffer's first element is the earliest key pressed
-Key _keyBuffer[16] = { 0 };
+Key _keyBuffer[256] = { 0 };
 int _keyBufferIndex = 0;
 
 KeyBinding _keyBindings[256] = { 0 };
@@ -109,11 +110,13 @@ void KEYPROCESS_Update(float deltime) {
 	}
 }
 
-void pushKey(SDL_Keysym sdlkey) {
-	if (_keyBufferIndex < 16) {
-		_keyBuffer[_keyBufferIndex].sym = sdlkey.sym;
-		// regarding the mod, we only care about ctrl, shift and alt
-		_keyBuffer[_keyBufferIndex].mod = sdlkey.mod & (KMOD_CTRL | KMOD_SHIFT | KMOD_ALT);
+void pushSDLKey(SDL_Keysym sdlkey) {
+	pushKey(sdlKey2Key(sdlkey));
+}
+
+void pushKey(Key key) {
+	if (_keyBufferIndex < 256) {
+		_keyBuffer[_keyBufferIndex] = key;
 		_keyBufferIndex++;
 	} else {
 		printf("ERR: trying to push key while _keyBuffer is full\n");
@@ -156,7 +159,7 @@ bool keyEqual(Key key1, Key key2) {
 
 KeyChain str2KeyChain(const char *str) {
 	KeyChain chain = { 0 };
-    chain.count = 0;
+	chain.count = 0;
 	int i = 0;
 	while (str[i] != '\0' && i < 16) {
 		if (isPrintable(str[i])) {
@@ -172,6 +175,9 @@ KeyChain str2KeyChain(const char *str) {
 }
 
 bool halfMatchKeyChain(KeyChain *chain) {
+	if (_keyBufferIndex == 0) {
+		return false;
+	}
 	for (int i = 0; i < chain->count && i < _keyBufferIndex; i++) {
 		if (!keyEqual(chain->keys[i], _keyBuffer[i])) {
 			return false;
@@ -204,8 +210,37 @@ bool matchKeyChain(KeyChain chain) {
 	return true;
 }
 
+void executeKeyBuffer(enum Mode theMode) {
+	while (_keyBufferIndex > 0) {
+		if (!halfMatchAny(theMode)) {
+			keyFallbackProcess(_keyBuffer[0]);
+			memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
+            _keyBufferIndex--;
+		} else {
+            bool matchone = false;
+			for (int i = 0; i < _keyBindingCount; i++) {
+				if (!(_keyBindings[i].modes & theMode)) {
+					continue;
+				}
+				if (matchKeyChain(_keyBindings[i].chain)) {
+					_keyBindings[i].callback();
+					memmove(_keyBuffer, _keyBuffer + _keyBindings[i].chain.count, sizeof(Key) * (_keyBufferIndex - _keyBindings[i].chain.count));
+                    _keyBufferIndex -= _keyBindings[i].chain.count;
+                    matchone = true;
+                    break;
+				}
+			}
+            if (!matchone) {
+                keyFallbackProcess(_keyBuffer[0]);
+                memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
+                _keyBufferIndex--;
+            }
+		}
+	}
+}
+
 void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode) {
-	pushKey(sdlkey);
+	pushSDLKey(sdlkey);
 	if (halfMatchAny(theMode)) {
 		for (int i = 0; i < _keyBindingCount; i++) {
 			if (!(theMode & _keyBindings[i].modes)) {
@@ -218,11 +253,19 @@ void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode) {
 				return;
 			}
 		}
-        
+
 		*halt = false;
 		keyStartWait();
 		return;
 	}
 	fallBackAllKeys();
 	*halt = true;
+}
+
+Key sdlKey2Key(SDL_Keysym sdlkey) {
+	Key key = { 0 };
+	key.sym = sdlkey.sym;
+	// regarding the mod, we only care about ctrl, shift and alt
+	key.mod = sdlkey.mod & (KMOD_CTRL | KMOD_SHIFT | KMOD_ALT);
+	return key;
 }
