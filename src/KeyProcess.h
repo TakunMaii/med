@@ -67,7 +67,7 @@ bool matchKeyChain(KeyChain chain);
 
 void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode);
 
-void executeKeyBuffer(enum Mode theMode);
+void executeKeyBuffer(enum Mode *theMode);
 
 Key sdlKey2Key(SDL_Keysym sdlkey);
 

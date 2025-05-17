@@ -1,0 +1,116 @@
+[
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/main.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/main.c",
+    "output": "/home/maii/med/med"
+  },
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/TextBuffer.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/TextBuffer.c",
+    "output": "/home/maii/med/med"
+  },
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/KeyProcess.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/KeyProcess.c",
+    "output": "/home/maii/med/med"
+  },
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/Mode.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/Mode.c",
+    "output": "/home/maii/med/med"
+  },
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/Common.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/Common.c",
+    "output": "/home/maii/med/med"
+  },
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/Register.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/Register.c",
+    "output": "/home/maii/med/med"
+  }
+]

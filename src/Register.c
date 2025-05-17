@@ -24,7 +24,7 @@ void initRegisters() {
     registersInit = true;
 }
 
-void execute_register(char register_name, bool *halt, Mode mode)
+void execute_register(char register_name, bool *halt, Mode *mode)
 {
     initRegisters();
     Register* reg = theRegister(register_name);

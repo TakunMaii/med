@@ -210,20 +210,22 @@ bool matchKeyChain(KeyChain chain) {
 	return true;
 }
 
-void executeKeyBuffer(enum Mode theMode) {
+void executeKeyBuffer(Mode *theMode) {
 	while (_keyBufferIndex > 0) {
-		if (!halfMatchAny(theMode)) {
+		if (!halfMatchAny(*theMode)) {
+            printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
 			keyFallbackProcess(_keyBuffer[0]);
 			memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
             _keyBufferIndex--;
 		} else {
             bool matchone = false;
 			for (int i = 0; i < _keyBindingCount; i++) {
-				if (!(_keyBindings[i].modes & theMode)) {
+				if (!(_keyBindings[i].modes & *theMode)) {
 					continue;
 				}
 				if (matchKeyChain(_keyBindings[i].chain)) {
 					_keyBindings[i].callback();
+                    printf("INFO: execute key binding : %c, count: %d\n", _keyBuffer[0].sym, _keyBindings[i].chain.count);
 					memmove(_keyBuffer, _keyBuffer + _keyBindings[i].chain.count, sizeof(Key) * (_keyBufferIndex - _keyBindings[i].chain.count));
                     _keyBufferIndex -= _keyBindings[i].chain.count;
                     matchone = true;
@@ -231,6 +233,7 @@ void executeKeyBuffer(enum Mode theMode) {
 				}
 			}
             if (!matchone) {
+                printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
                 keyFallbackProcess(_keyBuffer[0]);
                 memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
                 _keyBufferIndex--;

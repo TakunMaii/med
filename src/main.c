@@ -415,7 +415,7 @@ void processKeyEvent(SDL_Event event) {
 		cursorY++;
 	} else if (event.key.keysym.sym == SDLK_2 && event.key.keysym.mod & KMOD_SHIFT && theMode == MODE_NORMAL) {
 		bool halt = false;
-		execute_register('q', &halt, theMode);
+		execute_register('q', &halt, &theMode);
 	} else {
 		bool halt = false;
 		if (recording && event.key.keysym.sym != SDLK_q) {
