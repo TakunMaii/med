@@ -1,5 +1,8 @@
+#include "AtKeyFunc.h"
 #include "Common.h"
 #include "FKeyFunc.h"
+#include "QKeyFunc.h"
+#include "AtKeyFunc.h"
 #include "KeyProcess.h"
 #include "Mode.h"
 #include "PanelManagement.h"
@@ -246,7 +249,7 @@ void cursorFind(char c) {
 }
 
 bool isLetter(char c) {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
 bool isStartOfWordNow() {
@@ -326,11 +329,7 @@ void fallbackKeyProcess(Key key) {
 		} else if (key.sym == SDLK_e) {
 			moveCursorToEndofWord();
 		} else if (key.sym == SDLK_q) {
-			recording = !recording;
-            if(recording)
-            {
-                clearRegister(recordingReg);
-            }
+            recording = false;
 		} else if (theMode == MODE_NORMAL) {
 			if (key.sym == SDLK_v) {
 				if (key.mod & KMOD_CTRL) {
@@ -367,8 +366,30 @@ void test() {
 	theMode = MODE_NORMAL;
 }
 
-// define f key functions here
+void startRecord(char reg) {
+    recording = true;
+    recordingReg = reg;
+    clearRegister(recordingReg);
+}
+
+void executeRegister(char reg)
+{
+    bool halt = false;
+    // Before executing the register, we remove the 2 keys that
+    // we just press triggered this function, this is so naive
+    // that we need to change this.
+    *getKeyBufferIndexPtr() -= 2;
+    if(*getKeyBufferIndexPtr() < 0)
+    {
+        printf("ERR: Unknown situation occured!\n");
+        exit(1);
+    }
+    execute_register(reg, &halt, &theMode);
+}
+
 DEF_F_KEY_FUNCS
+DEF_Q_KEY_FUNCS
+DEF_AT_KEY_FUNCS
 
 void processKeyInit() {
 	registerKeyFallbackProcess(fallbackKeyProcess);
@@ -376,8 +397,9 @@ void processKeyInit() {
 		KeyChain keychain = str2KeyChain("jj");
 		registerKeyBinding(keychain, test, MODE_INSERT);
 	}
-	//register f key functions here
 	F_KEY_FUNC_REGISTER
+    Q_KEY_FUNC_REGISTER
+    AT_KEY_FUNC_REGISTER
 }
 
 void processKeyEvent(SDL_Event event) {
@@ -413,15 +435,12 @@ void processKeyEvent(SDL_Event event) {
 		textBuffer->lines[cursorY]->content[cursorX] = '\0';
 		cursorX = 0;
 		cursorY++;
-	} else if (event.key.keysym.sym == SDLK_2 && event.key.keysym.mod & KMOD_SHIFT && theMode == MODE_NORMAL) {
+	}else {
 		bool halt = false;
-		execute_register('q', &halt, &theMode);
-	} else {
-		bool halt = false;
-		if (recording && event.key.keysym.sym != SDLK_q) {
-			Key recordingKey = sdlKey2Key(event.key.keysym);
-			pushKeyToRegister(recordingReg, recordingKey);
-		}
+        if(recording && event.key.keysym.sym != SDLK_q)
+        {
+            pushKeyToRegister(recordingReg, sdlKey2Key(event.key.keysym));
+        }
 		processKey(event.key.keysym, &halt, theMode);
 	}
 }
@@ -501,8 +520,6 @@ int main(int argc, char *argv[]) {
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 		SDL_RenderClear(renderer);
 
-		float panelX = textPanel.posX + textPanelBiasX;
-		float panelY = textPanel.posY + textPanelBiasY;
 		float cursorPosX, cursorPosY;
 		moveCursor(&cursorPosX, &cursorPosY, font);
 

@@ -1,5 +1,6 @@
 #include "KeyProcess.h"
 #include "Mode.h"
+#include "SDL_keycode.h"
 #include <SDL2/SDL_config_unix.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,10 +13,91 @@ bool keyWaiting = false;
 Key _keyBuffer[256] = { 0 };
 int _keyBufferIndex = 0;
 
-KeyBinding _keyBindings[256] = { 0 };
+KeyBinding _keyBindings[512] = { 0 };
 int _keyBindingCount = 0;
 
 void (*keyFallbackProcess)(Key key) = NULL;
+
+//silly, need to change
+int *getKeyBufferIndexPtr()
+{
+    return &_keyBufferIndex;
+}
+
+Key char2key(char c) {
+	if (c >= 'a' && c <= 'z' || c >= '1' && c <= '9' || c == '0' || c == '-' || c == '=' || c == '[' || c == ']' || c == '\\' || c == ';' || c == '\'' || c == ',' || c == '.' || c == '/' || c == '`') {
+		return (Key){ .sym = c, .mod = 0 };
+	}
+	if (c >= 'A' && c <= 'Z') {
+		return (Key){ .sym = c - ('A' - 'a'), .mod = KMOD_SHIFT };
+	}
+	if (c == '!') {
+		return (Key){ .sym = '1', .mod = KMOD_SHIFT };
+	}
+	if (c == '@') {
+		return (Key){ .sym = '2', .mod = KMOD_SHIFT };
+	}
+	if (c == '#') {
+		return (Key){ .sym = '3', .mod = KMOD_SHIFT };
+	}
+	if (c == '$') {
+		return (Key){ .sym = '4', .mod = KMOD_SHIFT };
+	}
+	if (c == '%') {
+		return (Key){ .sym = '5', .mod = KMOD_SHIFT };
+	}
+	if (c == '^') {
+		return (Key){ .sym = '6', .mod = KMOD_SHIFT };
+	}
+	if (c == '&') {
+		return (Key){ .sym = '7', .mod = KMOD_SHIFT };
+	}
+	if (c == '*') {
+		return (Key){ .sym = '8', .mod = KMOD_SHIFT };
+	}
+	if (c == '(') {
+		return (Key){ .sym = '9', .mod = KMOD_SHIFT };
+	}
+	if (c == ')') {
+		return (Key){ .sym = '0', .mod = KMOD_SHIFT };
+	}
+	if (c == '_') {
+		return (Key){ .sym = '-', .mod = KMOD_SHIFT };
+	}
+	if (c == '+') {
+		return (Key){ .sym = '=', .mod = KMOD_SHIFT };
+	}
+	if (c == '{') {
+		return (Key){ .sym = '[', .mod = KMOD_SHIFT };
+	}
+	if (c == '}') {
+		return (Key){ .sym = ']', .mod = KMOD_SHIFT };
+	}
+	if (c == '|') {
+		return (Key){ .sym = '\\', .mod = KMOD_SHIFT };
+	}
+	if (c == ':') {
+		return (Key){ .sym = ';', .mod = KMOD_SHIFT };
+	}
+	if (c == '"') {
+		return (Key){ .sym = '\'', .mod = KMOD_SHIFT };
+	}
+	if (c == '<') {
+		return (Key){ .sym = ',', .mod = KMOD_SHIFT };
+	}
+	if (c == '>') {
+		return (Key){ .sym = '.', .mod = KMOD_SHIFT };
+	}
+	if (c == '?') {
+		return (Key){ .sym = '/', .mod = KMOD_SHIFT };
+	}
+	if (c == '~') {
+		return (Key){ .sym = '`', .mod = KMOD_SHIFT };
+	}
+	printf("ERR: char2key: unknown character %c\n", c);
+	exit(1);
+	return (Key){ .sym = 0, .mod = 0 };
+}
 
 void keyStartWait() {
 	keyWaiting = true;
@@ -134,7 +216,7 @@ void popKey(int num) {
 }
 
 void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes) {
-	if (_keyBindingCount < 256) {
+	if (_keyBindingCount < 512) {
 		_keyBindings[_keyBindingCount].chain = chain;
 		_keyBindings[_keyBindingCount].callback = callback;
 		_keyBindings[_keyBindingCount].modes = modes;
@@ -154,7 +236,8 @@ bool isPrintable(int key) {
 }
 
 bool keyEqual(Key key1, Key key2) {
-	return key1.sym == key2.sym && key1.mod == key2.mod;
+	return key1.sym == key2.sym && ((key1.mod & key2.mod & (KMOD_SHIFT | KMOD_CTRL | KMOD_ALT)) ||
+            (key1.mod == 0 && key1.mod == key2.mod));
 }
 
 KeyChain str2KeyChain(const char *str) {
@@ -163,8 +246,7 @@ KeyChain str2KeyChain(const char *str) {
 	int i = 0;
 	while (str[i] != '\0' && i < 16) {
 		if (isPrintable(str[i])) {
-			chain.keys[chain.count].sym = str[i];
-			chain.keys[chain.count].mod = 0;
+			chain.keys[chain.count] = char2key(str[i]);
 			chain.count++;
 		} else {
 			printf("ERR: non printable character in key chain\n");
@@ -213,31 +295,31 @@ bool matchKeyChain(KeyChain chain) {
 void executeKeyBuffer(Mode *theMode) {
 	while (_keyBufferIndex > 0) {
 		if (!halfMatchAny(*theMode)) {
-            printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
+			printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
 			keyFallbackProcess(_keyBuffer[0]);
 			memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
-            _keyBufferIndex--;
+			_keyBufferIndex--;
 		} else {
-            bool matchone = false;
+			bool matchone = false;
 			for (int i = 0; i < _keyBindingCount; i++) {
 				if (!(_keyBindings[i].modes & *theMode)) {
 					continue;
 				}
 				if (matchKeyChain(_keyBindings[i].chain)) {
 					_keyBindings[i].callback();
-                    printf("INFO: execute key binding : %c, count: %d\n", _keyBuffer[0].sym, _keyBindings[i].chain.count);
+					printf("INFO: execute key binding : %c, count: %d\n", _keyBuffer[0].sym, _keyBindings[i].chain.count);
 					memmove(_keyBuffer, _keyBuffer + _keyBindings[i].chain.count, sizeof(Key) * (_keyBufferIndex - _keyBindings[i].chain.count));
-                    _keyBufferIndex -= _keyBindings[i].chain.count;
-                    matchone = true;
-                    break;
+					_keyBufferIndex -= _keyBindings[i].chain.count;
+					matchone = true;
+					break;
 				}
 			}
-            if (!matchone) {
-                printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
-                keyFallbackProcess(_keyBuffer[0]);
-                memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
-                _keyBufferIndex--;
-            }
+			if (!matchone) {
+				printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
+				keyFallbackProcess(_keyBuffer[0]);
+				memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
+				_keyBufferIndex--;
+			}
 		}
 	}
 }

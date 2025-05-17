@@ -28,6 +28,8 @@ typedef struct
     int modes;
 } KeyBinding;
 
+//silly, need to change
+int *getKeyBufferIndexPtr();
 
 void keyStartWait();
 

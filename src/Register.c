@@ -3,8 +3,10 @@
 #include "Mode.h"
 #include <stdio.h>
 
+#define REGISTER_SIZE 100
+
 // 33~126
-Register registers[94] = {0};
+Register registers[REGISTER_SIZE] = {0};
 bool registersInit = false;
 
 Register* theRegister(char c) {
@@ -18,7 +20,7 @@ void initRegisters() {
     if (registersInit) {
         return;
     }
-    for (int i = 0; i < 94; i++) {
+    for (int i = 0; i < REGISTER_SIZE; i++) {
         registers[i].length = 0;
     }
     registersInit = true;
@@ -32,6 +34,7 @@ void execute_register(char register_name, bool *halt, Mode *mode)
         printf("ERR:Invalid register name: %c\n", register_name);
         return;
     }
+    printf("INFO: Executing reg %c of length %d\n",register_name, reg->length);
     for (int i = 0;i<reg->length;i++)
     {
         pushKey(reg->content[i]);
