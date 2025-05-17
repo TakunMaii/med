@@ -1,10 +1,7 @@
-#include "AtKeyFunc.h"
 #include "Common.h"
-#include "FKeyFunc.h"
 #include "KeyProcess.h"
 #include "Mode.h"
 #include "PanelManagement.h"
-#include "QKeyFunc.h"
 #include "Register.h"
 #include "TextBuffer.h"
 #include <SDL2/SDL.h>
@@ -234,7 +231,8 @@ void moveCursorRight() {
 	}
 }
 
-void cursorFind(char c) {
+void cursorFind(Key* tail) {
+    char c = tail[0].sym;
 	if (cursorX >= strlen(textBuffer->lines[cursorY]->content)) {
 		return;
 	}
@@ -415,13 +413,15 @@ void test() {
 	theMode = MODE_NORMAL;
 }
 
-void startRecord(char reg) {
+void startRecord(Key* tail) {
+    char reg = tail[0].sym;
 	recording = true;
 	recordingReg = reg;
 	clearRegister(recordingReg);
 }
 
-void executeRegister(char reg) {
+void executeRegister(Key* tail) {
+    char reg = tail[0].sym;
 	bool halt = false;
 	// Before executing the register, we remove the 2 keys that
 	// we just press triggered this function, this is so naive
@@ -433,10 +433,6 @@ void executeRegister(char reg) {
 	}
 	execute_register(reg, &halt, &theMode);
 }
-
-DEF_F_KEY_FUNCS
-DEF_Q_KEY_FUNCS
-DEF_AT_KEY_FUNCS
 
 void goToFirstPlace() {
 	cursorX = 0;
@@ -453,20 +449,31 @@ void processKeyInit() {
 	registerKeyFallbackProcess(fallbackKeyProcess);
 	{
 		KeyChain keychain = str2KeyChain("jj");
-		registerKeyBinding(keychain, test, MODE_INSERT);
+		registerKeyBinding(keychain, test, MODE_INSERT, 0);
 	}
 	{
 		KeyChain keychain = str2KeyChain("gg");
-		registerKeyBinding(keychain, goToFirstPlace, MODE_NORMAL);
+		registerKeyBinding(keychain, goToFirstPlace, MODE_NORMAL, 0);
 	}
 	{
 		KeyChain keychain = str2KeyChain("dd");
-		registerKeyBinding(keychain, deleteCurLine, MODE_NORMAL);
+		registerKeyBinding(keychain, deleteCurLine, MODE_NORMAL, 0);
 	}
-
-	F_KEY_FUNC_REGISTER
-	Q_KEY_FUNC_REGISTER
-	AT_KEY_FUNC_REGISTER
+	{
+		KeyChain keychain = str2KeyChain("f");
+		registerKeyBinding(keychain, cursorFind, MODE_NORMAL, 1);
+	}
+	{
+		KeyChain keychain = str2KeyChain("q");
+		registerKeyBinding(keychain, startRecord, MODE_NORMAL, 1);
+	}
+	{
+        KeyChain keychain = {0};
+        keychain.count = 1;
+        keychain.keys[0].sym = SDLK_2;
+        keychain.keys[0].mod = KMOD_SHIFT;//@
+		registerKeyBinding(keychain, executeRegister, MODE_NORMAL, 1);
+	}
 }
 
 void processKeyEvent(SDL_Event event) {

@@ -19,13 +19,14 @@ typedef struct
 } KeyChain;
 // KeyChain is a list of keys pressed in order
 
-typedef void(*KeyCallback)();
+typedef void(*KeyCallback)(Key* tail);
 
 typedef struct
 {
     KeyChain chain;
     KeyCallback callback;
     int modes;
+    int listenCount;
 } KeyBinding;
 
 //silly, need to change
@@ -49,7 +50,7 @@ void pushKey(Key key);
 
 void popKey(int num);
 
-void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes);
+void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes, int listenCount);
 
 void registerKeyFallbackProcess(void (*process)(Key key));
 
@@ -65,7 +66,7 @@ bool halfMatchKeyChain(KeyChain *chain);
 
 bool halfMatchAny(enum Mode theMode);
 
-bool matchKeyChain(KeyChain chain);
+bool matchKeyChain(KeyChain chain, int listenCount);
 
 void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode);
 

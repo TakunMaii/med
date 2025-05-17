@@ -215,11 +215,24 @@ void popKey(int num) {
 	}
 }
 
-void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes) {
+void popKeyFromBottom(int num)
+{
+    if (_keyBufferIndex > 0) {
+        memmove(_keyBuffer, _keyBuffer + num, sizeof(Key) * (_keyBufferIndex - num));
+        _keyBufferIndex -= num;
+        if (_keyBufferIndex < 0) {
+            _keyBufferIndex = 0;
+            printf("ERR: trying to pop more keys than there are in _keyBuffer\n");
+        }
+    }
+}
+
+void registerKeyBinding(KeyChain chain, KeyCallback callback, int modes, int listenCount) {
 	if (_keyBindingCount < 512) {
 		_keyBindings[_keyBindingCount].chain = chain;
 		_keyBindings[_keyBindingCount].callback = callback;
 		_keyBindings[_keyBindingCount].modes = modes;
+        _keyBindings[_keyBindingCount].listenCount = listenCount;
 		_keyBindingCount++;
 	} else {
 		printf("ERR: trying to register more key bindings than allowed\n");
@@ -280,8 +293,8 @@ bool halfMatchAny(enum Mode theMode) {
 	return false;
 }
 
-bool matchKeyChain(KeyChain chain) {
-	if (chain.count > _keyBufferIndex) {
+bool matchKeyChain(KeyChain chain, int listenCount) {
+	if (chain.count + listenCount > _keyBufferIndex) {
 		return false;
 	}
 	for (int i = 0; i < chain.count; i++) {
@@ -297,19 +310,17 @@ void executeKeyBuffer(Mode *theMode) {
 		if (!halfMatchAny(*theMode)) {
 			printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
 			keyFallbackProcess(_keyBuffer[0]);
-			memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
-			_keyBufferIndex--;
+            popKeyFromBottom(1);
 		} else {
 			bool matchone = false;
 			for (int i = 0; i < _keyBindingCount; i++) {
 				if (!(_keyBindings[i].modes & *theMode)) {
 					continue;
 				}
-				if (matchKeyChain(_keyBindings[i].chain)) {
-					_keyBindings[i].callback();
+				if (matchKeyChain(_keyBindings[i].chain, _keyBindings[i].listenCount)) {
+					_keyBindings[i].callback(_keyBuffer + _keyBindings[i].chain.count);
 					printf("INFO: execute key binding : %c, count: %d\n", _keyBuffer[0].sym, _keyBindings[i].chain.count);
-					memmove(_keyBuffer, _keyBuffer + _keyBindings[i].chain.count, sizeof(Key) * (_keyBufferIndex - _keyBindings[i].chain.count));
-					_keyBufferIndex -= _keyBindings[i].chain.count;
+                    popKeyFromBottom(_keyBindings[i].chain.count + _keyBindings[i].listenCount);
 					matchone = true;
 					break;
 				}
@@ -317,8 +328,7 @@ void executeKeyBuffer(Mode *theMode) {
 			if (!matchone) {
 				printf("INFO: fallback process : %c\n", _keyBuffer[0].sym);
 				keyFallbackProcess(_keyBuffer[0]);
-				memmove(_keyBuffer, _keyBuffer + 1, sizeof(Key) * (_keyBufferIndex - 1));
-				_keyBufferIndex--;
+                popKeyFromBottom(1);
 			}
 		}
 	}
@@ -331,9 +341,9 @@ void processKey(SDL_Keysym sdlkey, bool *halt, enum Mode theMode) {
 			if (!(theMode & _keyBindings[i].modes)) {
 				continue;
 			}
-			if (matchKeyChain(_keyBindings[i].chain)) {
-				_keyBindings[i].callback();
-				popKey(_keyBindings[i].chain.count);
+			if (matchKeyChain(_keyBindings[i].chain, _keyBindings[i].listenCount)) {
+				_keyBindings[i].callback(_keyBuffer + _keyBindings[i].chain.count);
+				popKey(_keyBindings[i].chain.count + _keyBindings[i].listenCount);
 				*halt = true;
 				return;
 			}
