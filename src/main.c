@@ -307,7 +307,6 @@ void moveCursorToEndofWord() {
 }
 
 void fallbackKeyProcess(Key key) {
-	// process key event
 	if (key.sym == SDLK_ESCAPE) {
 		if (theMode != MODE_NORMAL) {
 			theMode = MODE_NORMAL;
@@ -343,12 +342,30 @@ void fallbackKeyProcess(Key key) {
 	} else if (theMode & (MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE)) {
 		if (key.sym == SDLK_i) {
 			theMode = MODE_INSERT;
+		} else if (key.sym == SDLK_a && key.mod & KMOD_SHIFT) {
+			theMode = MODE_INSERT;
+			cursorX = strlen(textBuffer->lines[cursorY]->content);
+		} else if (key.sym == SDLK_a) {
+			theMode = MODE_INSERT;
+			cursorX++;
+			if (cursorX > strlen(textBuffer->lines[cursorY]->content)) {
+				cursorX = strlen(textBuffer->lines[cursorY]->content);
+			}
 		} else if (key.sym == SDLK_j) {
 			moveCursorDown();
 		} else if (key.sym == SDLK_k) {
 			moveCursorUp();
+		} else if (key.sym == SDLK_o && key.mod & KMOD_SHIFT) {
+            insertNewLineAt(textBuffer, cursorY, "");
+            cursorX = 0;
+		} else if (key.sym == SDLK_o) {
+            insertNewLineAt(textBuffer, cursorY + 1, "");
+            cursorY ++;
+            cursorX = 0;
 		} else if (key.sym == SDLK_h) {
 			moveCursorLeft();
+		} else if (key.sym == SDLK_x) {
+            deleteCharAt(textBuffer, cursorY, cursorX);
 		} else if (key.sym == SDLK_l) {
 			moveCursorRight();
 		} else if (key.sym == SDLK_w) {
@@ -357,6 +374,9 @@ void fallbackKeyProcess(Key key) {
 			moveCursorLeftWord();
 		} else if (key.sym == SDLK_e) {
 			moveCursorToEndofWord();
+		} else if (key.sym == SDLK_g && key.mod & KMOD_SHIFT) {
+			cursorX = 0;
+			cursorY = textBuffer->line_count - 1;
 		} else if (key.sym == SDLK_q) {
 			recording = false;
 		} else if (theMode == MODE_NORMAL) {
@@ -418,12 +438,32 @@ DEF_F_KEY_FUNCS
 DEF_Q_KEY_FUNCS
 DEF_AT_KEY_FUNCS
 
+void goToFirstPlace() {
+	cursorX = 0;
+	cursorY = 0;
+}
+
+void deleteCurLine() {
+    if (cursorY < textBuffer->line_count) {
+        deleteLineAt(textBuffer, cursorY);
+    }
+}
+
 void processKeyInit() {
 	registerKeyFallbackProcess(fallbackKeyProcess);
 	{
 		KeyChain keychain = str2KeyChain("jj");
 		registerKeyBinding(keychain, test, MODE_INSERT);
 	}
+	{
+		KeyChain keychain = str2KeyChain("gg");
+		registerKeyBinding(keychain, goToFirstPlace, MODE_NORMAL);
+	}
+	{
+		KeyChain keychain = str2KeyChain("dd");
+		registerKeyBinding(keychain, deleteCurLine, MODE_NORMAL);
+	}
+
 	F_KEY_FUNC_REGISTER
 	Q_KEY_FUNC_REGISTER
 	AT_KEY_FUNC_REGISTER
@@ -433,7 +473,7 @@ void processKeyEvent(SDL_Event event) {
 	// recording key to register if needed
 	bool halt = false;
 	if (recording && event.key.keysym.sym != SDLK_q) {
-		pushKeyToRegister(recordingReg,sdlKey2Key(event.key.keysym) );
+		pushKeyToRegister(recordingReg, sdlKey2Key(event.key.keysym));
 	}
 	processKey(event.key.keysym, &halt, theMode);
 }
