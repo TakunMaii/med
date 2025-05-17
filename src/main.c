@@ -87,7 +87,7 @@ void renderTextBuffer(TextBuffer *textBuffer, SDL_Renderer *renderer,
 
 void renderLineNumber(TextBuffer *textBuffer, SDL_Renderer *renderer,
 		TTF_Font *font, float lineSpace) {
-	float x = lineNumberPanel.posX + textPanelBiasX;
+	float x = lineNumberPanel.posX;
 	float y = lineNumberPanel.posY + textPanelBiasY;
 	float curY = y;
 	for (int i = 0; i < textBuffer->line_count; i++) {
@@ -104,7 +104,12 @@ void renderStatusBar(SDL_Renderer *renderer, TTF_Font *font) {
 	char bufferstr[20];
 	int bufferlen = 0;
 	for (int i = 0; i < getKeyBufferIndex(); i++) {
-		bufferstr[bufferlen++] = getKeyBuffer()[i].sym;
+		bufferstr[bufferlen] = getKeyBuffer()[i].sym;
+        if(getKeyBuffer()[i].mod & KMOD_SHIFT)
+        {
+            bufferstr[bufferlen] = toUpper(bufferstr[bufferlen]);
+        }
+        bufferlen++;
 	}
 	bufferstr[bufferlen] = '\0';
 
@@ -468,10 +473,7 @@ void processKeyInit() {
 		registerKeyBinding(keychain, startRecord, MODE_NORMAL, 1);
 	}
 	{
-        KeyChain keychain = {0};
-        keychain.count = 1;
-        keychain.keys[0].sym = SDLK_2;
-        keychain.keys[0].mod = KMOD_SHIFT;//@
+		KeyChain keychain = str2KeyChain("@");
 		registerKeyBinding(keychain, executeRegister, MODE_NORMAL, 1);
 	}
 }
