@@ -1,11 +1,10 @@
 #include "AtKeyFunc.h"
 #include "Common.h"
 #include "FKeyFunc.h"
-#include "QKeyFunc.h"
-#include "AtKeyFunc.h"
 #include "KeyProcess.h"
 #include "Mode.h"
 #include "PanelManagement.h"
+#include "QKeyFunc.h"
 #include "Register.h"
 #include "TextBuffer.h"
 #include <SDL2/SDL.h>
@@ -308,10 +307,40 @@ void moveCursorToEndofWord() {
 }
 
 void fallbackKeyProcess(Key key) {
-	if (!isPrintable(key.sym)) {
-		return;
-	}
-	if (theMode & (MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE)) {
+	// process key event
+	if (key.sym == SDLK_ESCAPE) {
+		if (theMode != MODE_NORMAL) {
+			theMode = MODE_NORMAL;
+		} else {
+			quit = true;
+		}
+	} else if (key.sym == SDLK_BACKSPACE) {
+		if (cursorX > 0) {
+			deleteCharAt(textBuffer, cursorY, cursorX - 1);
+			cursorX--;
+		} else if (cursorY > 0) {
+			int x = strlen(textBuffer->lines[cursorY - 1]->content);
+			strcpy(textBuffer->lines[cursorY - 1]->content + strlen(textBuffer->lines[cursorY - 1]->content),
+					textBuffer->lines[cursorY]->content);
+			deleteLineAt(textBuffer, cursorY);
+			cursorY--;
+			cursorX = x;
+		}
+	} else if (key.sym == SDLK_UP) {
+		moveCursorUp();
+	} else if (key.sym == SDLK_DOWN) {
+		moveCursorDown();
+	} else if (key.sym == SDLK_LEFT) {
+		moveCursorLeft();
+	} else if (key.sym == SDLK_RIGHT) {
+		moveCursorRight();
+	} else if (key.sym == SDLK_RETURN) {
+		const char *restLine = textBuffer->lines[cursorY]->content + cursorX;
+		insertNewLineAt(textBuffer, cursorY + 1, restLine);
+		textBuffer->lines[cursorY]->content[cursorX] = '\0';
+		cursorX = 0;
+		cursorY++;
+	} else if (theMode & (MODE_NORMAL | MODE_VISUAL | MODE_VISUAL_BLOCK | MODE_VISUAL_LINE)) {
 		if (key.sym == SDLK_i) {
 			theMode = MODE_INSERT;
 		} else if (key.sym == SDLK_j) {
@@ -329,7 +358,7 @@ void fallbackKeyProcess(Key key) {
 		} else if (key.sym == SDLK_e) {
 			moveCursorToEndofWord();
 		} else if (key.sym == SDLK_q) {
-            recording = false;
+			recording = false;
 		} else if (theMode == MODE_NORMAL) {
 			if (key.sym == SDLK_v) {
 				if (key.mod & KMOD_CTRL) {
@@ -367,24 +396,22 @@ void test() {
 }
 
 void startRecord(char reg) {
-    recording = true;
-    recordingReg = reg;
-    clearRegister(recordingReg);
+	recording = true;
+	recordingReg = reg;
+	clearRegister(recordingReg);
 }
 
-void executeRegister(char reg)
-{
-    bool halt = false;
-    // Before executing the register, we remove the 2 keys that
-    // we just press triggered this function, this is so naive
-    // that we need to change this.
-    *getKeyBufferIndexPtr() -= 2;
-    if(*getKeyBufferIndexPtr() < 0)
-    {
-        printf("ERR: Unknown situation occured!\n");
-        exit(1);
-    }
-    execute_register(reg, &halt, &theMode);
+void executeRegister(char reg) {
+	bool halt = false;
+	// Before executing the register, we remove the 2 keys that
+	// we just press triggered this function, this is so naive
+	// that we need to change this.
+	*getKeyBufferIndexPtr() -= 2;
+	if (*getKeyBufferIndexPtr() < 0) {
+		printf("ERR: Unknown situation occured!\n");
+		exit(1);
+	}
+	execute_register(reg, &halt, &theMode);
 }
 
 DEF_F_KEY_FUNCS
@@ -398,51 +425,17 @@ void processKeyInit() {
 		registerKeyBinding(keychain, test, MODE_INSERT);
 	}
 	F_KEY_FUNC_REGISTER
-    Q_KEY_FUNC_REGISTER
-    AT_KEY_FUNC_REGISTER
+	Q_KEY_FUNC_REGISTER
+	AT_KEY_FUNC_REGISTER
 }
 
 void processKeyEvent(SDL_Event event) {
-	if (event.key.keysym.sym == SDLK_ESCAPE) {
-		if (theMode != MODE_NORMAL) {
-			theMode = MODE_NORMAL;
-		} else {
-			quit = true;
-		}
-	} else if (event.key.keysym.sym == SDLK_BACKSPACE) {
-		if (cursorX > 0) {
-			deleteCharAt(textBuffer, cursorY, cursorX - 1);
-			cursorX--;
-		} else if (cursorY > 0) {
-			int x = strlen(textBuffer->lines[cursorY - 1]->content);
-			strcpy(textBuffer->lines[cursorY - 1]->content + strlen(textBuffer->lines[cursorY - 1]->content),
-					textBuffer->lines[cursorY]->content);
-			deleteLineAt(textBuffer, cursorY);
-			cursorY--;
-			cursorX = x;
-		}
-	} else if (event.key.keysym.sym == SDLK_UP) {
-		moveCursorUp();
-	} else if (event.key.keysym.sym == SDLK_DOWN) {
-		moveCursorDown();
-	} else if (event.key.keysym.sym == SDLK_LEFT) {
-		moveCursorLeft();
-	} else if (event.key.keysym.sym == SDLK_RIGHT) {
-		moveCursorRight();
-	} else if (event.key.keysym.sym == SDLK_RETURN) {
-		const char *restLine = textBuffer->lines[cursorY]->content + cursorX;
-		insertNewLineAt(textBuffer, cursorY + 1, restLine);
-		textBuffer->lines[cursorY]->content[cursorX] = '\0';
-		cursorX = 0;
-		cursorY++;
-	}else {
-		bool halt = false;
-        if(recording && event.key.keysym.sym != SDLK_q)
-        {
-            pushKeyToRegister(recordingReg, sdlKey2Key(event.key.keysym));
-        }
-		processKey(event.key.keysym, &halt, theMode);
+	// recording key to register if needed
+	bool halt = false;
+	if (recording && event.key.keysym.sym != SDLK_q) {
+		pushKeyToRegister(recordingReg,sdlKey2Key(event.key.keysym) );
 	}
+	processKey(event.key.keysym, &halt, theMode);
 }
 
 void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font) {
