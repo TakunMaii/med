@@ -3,7 +3,7 @@
 ## Overview
 MedScript is a simple programming language designed for configuring med the text editor.
 
-Med itself is also a interpreter for MedScript.
+Med itself is also an interpreter for MedScript.
 
 ## Syntax
 The syntax of MedScript is sort of like lua but with some difference. For example, if you want to create a variable, you can do it like this:
@@ -138,7 +138,7 @@ result = add(1, 2)
 ## Acessibility of Variables
 There are two types of variables in MedScript: global and local. A global variable is a variable that can be accessed from anywhere in the code, while a local variable is a variable that can only be accessed from within the function where it is defined.
 
-Specifically, there is table containing all the global variables and whenever you call a function, the interpreter will create a new table for the local variables, which will be recycled when the function returns. When a function is called within another one, there will be one more table created for the local variables.
+Specifically, there is a table containing all the global variables and whenever you call a function, the interpreter will create a new table for the local variables, which will be recycled when the function returns. When a function is called within another one, there will be one more table created for the local variables.
 
 Every time when you reference a variable, the interpreter will first check if it is a local variable within the current scope. If it is not, the interpreter will check if it is a variable in the variable table of the very upper function calling stack, layer by layer. Finally it will check if it is a global variable.
 
