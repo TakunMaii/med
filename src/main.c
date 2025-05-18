@@ -4,6 +4,7 @@
 #include "PanelManagement.h"
 #include "Register.h"
 #include "TextBuffer.h"
+#include "MedScript/Parser.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
@@ -523,6 +524,22 @@ void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font) {
 }
 
 int main(int argc, char *argv[]) {
+    // if there is -ms option, read the rest of the line as a script
+    if (argc > 1 && strcmp(argv[1], "-ms") == 0) {
+        char str[100];
+        while (fgets(str, 100, stdin)) {
+            if (str[0] == '\n') {
+                break;
+            }
+            printf("INFO: read input: %s\n", str);
+            int tokenCount = 0;
+            Token *tokens = parse(str, &tokenCount);
+            printf("INFO: parsed %d tokens\n", tokenCount);
+            printTokens(tokens, tokenCount);
+        }
+        exit(0);
+    }
+
 	if (argc > 1) {
 		textBuffer = createTextBufferWithFile(argv[1]);
 	} else {

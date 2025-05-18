@@ -112,5 +112,24 @@
     "directory": "/home/maii/med",
     "file": "/home/maii/med/src/Register.c",
     "output": "/home/maii/med/med"
+  },
+  {
+    "arguments": [
+      "/usr/sbin/gcc",
+      "-c",
+      "-Wall",
+      "-Wextra",
+      "-pedantic",
+      "-std=c99",
+      "-I/usr/include/SDL2",
+      "-D_GNU_SOURCE=1",
+      "-D_REENTRANT",
+      "-o",
+      "med",
+      "src/MedScript/Parser.c"
+    ],
+    "directory": "/home/maii/med",
+    "file": "/home/maii/med/src/MedScript/Parser.c",
+    "output": "/home/maii/med/med"
   }
 ]
