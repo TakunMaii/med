@@ -61,7 +61,7 @@ ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *ste
 		Token token = tokens[*stepForward];
 		if (token.type == TOKEN_TYPE_IDENTIFIER) {
 			ASTNode *valueNode = malloc(sizeof(ASTNode));
-			valueNode->type = AST_VALUE;
+			valueNode->type = AST_FETCH_VARIABLE;
 			strcpy(valueNode->data.fetchVariable.variableName, token.value.identifier);
 			pushASTNode(valueStack, valueNode);
             (*stepForward)++;
@@ -85,30 +85,14 @@ ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *ste
 			node->data.calculate.operation = TOKEN_TYPE_PLUS;
 
 			if (operatorStack->ptr > 0) {
-				ASTNode *topOperator = popASTNode(operatorStack);
+				ASTNode *topOperator = operatorStack->content[operatorStack->ptr - 1];
 				if (topOperator->data.calculate.operation == TOKEN_TYPE_DIVIDE || topOperator->data.calculate.operation == TOKEN_TYPE_MULTIPLY) {
 					ASTNode *value1 = popASTNode(valueStack);
 					ASTNode *value2 = popASTNode(valueStack);
-					ASTNode *calculatedValue = malloc(sizeof(ASTNode));
-					calculatedValue->type = AST_VALUE;
-					calculatedValue->data.value.type = (value1->data.value.type == VARIABLE_TYPE_INTEGER && value2->data.value.type == VARIABLE_TYPE_INTEGER) ? VARIABLE_TYPE_INTEGER : VARIABLE_TYPE_FLOAT;
-					if (calculatedValue->data.value.type == VARIABLE_TYPE_INTEGER) {
-						if (topOperator->data.calculate.operation == TOKEN_TYPE_MULTIPLY) {
-							calculatedValue->data.value.value.integer = value1->data.value.value.integer * value2->data.value.value.integer;
-						} else {
-							calculatedValue->data.value.value.integer = value2->data.value.value.integer / value1->data.value.value.integer;
-						}
-					} else {
-						if (topOperator->data.calculate.operation == TOKEN_TYPE_MULTIPLY) {
-							calculatedValue->data.value.value.floating = value1->data.value.value.floating * value2->data.value.value.floating;
-						} else {
-							calculatedValue->data.value.value.floating = value2->data.value.value.floating / value1->data.value.value.floating;
-						}
-					}
-                    pushASTNode(valueStack, calculatedValue);
-                    free(value1);
-                    free(value2);
-                    free(topOperator);
+                    topOperator->data.calculate.leftOperand = value2;
+                    topOperator->data.calculate.rightOperand = value1;
+                    popASTNode(operatorStack);
+                    pushASTNode(valueStack, topOperator);
 				}
 			}
 
@@ -120,30 +104,14 @@ ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *ste
 			node->data.calculate.operation = TOKEN_TYPE_MINUS;
 
 			if (operatorStack->ptr > 0) {
-				ASTNode *topOperator = popASTNode(operatorStack);
+				ASTNode *topOperator = operatorStack->content[operatorStack->ptr - 1];
 				if (topOperator->data.calculate.operation == TOKEN_TYPE_DIVIDE || topOperator->data.calculate.operation == TOKEN_TYPE_MULTIPLY) {
 					ASTNode *value1 = popASTNode(valueStack);
 					ASTNode *value2 = popASTNode(valueStack);
-					ASTNode *calculatedValue = malloc(sizeof(ASTNode));
-					calculatedValue->type = AST_VALUE;
-					calculatedValue->data.value.type = (value1->data.value.type == VARIABLE_TYPE_INTEGER && value2->data.value.type == VARIABLE_TYPE_INTEGER) ? VARIABLE_TYPE_INTEGER : VARIABLE_TYPE_FLOAT;
-					if (calculatedValue->data.value.type == VARIABLE_TYPE_INTEGER) {
-						if (topOperator->data.calculate.operation == TOKEN_TYPE_MULTIPLY) {
-							calculatedValue->data.value.value.integer = value1->data.value.value.integer * value2->data.value.value.integer;
-						} else {
-							calculatedValue->data.value.value.integer = value2->data.value.value.integer / value1->data.value.value.integer;
-						}
-					} else {
-						if (topOperator->data.calculate.operation == TOKEN_TYPE_MULTIPLY) {
-							calculatedValue->data.value.value.floating = value1->data.value.value.floating * value2->data.value.value.floating;
-						} else {
-							calculatedValue->data.value.value.floating = value2->data.value.value.floating / value1->data.value.value.floating;
-						}
-					}
-                    pushASTNode(valueStack, calculatedValue);
-                    free(value1);
-                    free(value2);
-                    free(topOperator);
+                    topOperator->data.calculate.leftOperand = value2;
+                    topOperator->data.calculate.rightOperand = value1;
+                    popASTNode(operatorStack);
+                    pushASTNode(valueStack, topOperator);
 				}
 			}
 
@@ -161,9 +129,15 @@ ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *ste
 			node->data.calculate.operation = TOKEN_TYPE_DIVIDE;
             pushASTNode(operatorStack, node);
 			(*stepForward)++;
-		}
+        } else {
+            // encounter an non-calculation token, which means
+            // here is the end of the expression
+            break;
+        }
 	}
 
+    printf("INFO: ASTNodeStack valueStack size is %d\n", valueStack->ptr);
+    printf("INFO: ASTNodeStack operatorStack size is %d\n", operatorStack->ptr);
     while(operatorStack->ptr > 0) {
         ASTNode *topOperator = popASTNode(operatorStack);
         ASTNode *value1 = popASTNode(valueStack);
@@ -171,22 +145,22 @@ ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *ste
         topOperator->data.calculate.leftOperand = value2;
         topOperator->data.calculate.rightOperand = value1;
         pushASTNode(valueStack, topOperator);
-        free(value1);
-        free(value2);
     }
 
     *success = true;
     if(valueStack->ptr != 1)
     {
-        printf("ERR: ASTNodeStack valueStack size is not 1\n");
-        exit(1);
+        printf("WARN: ASTNodeStack valueStack size is not 1\n");
     }
 	return popASTNode(valueStack);
 }
 
 ASTNode *tokens2AST(Token *tokens, int tokenCount) {
 	ASTNode *root = NULL;
+    bool success;
 	int i = 0;
+    return tryFindValueNode(tokens, tokenCount, &success, &i);
+    // test
 	while (i < tokenCount) {
 		if (tokens[i].type == TOKEN_TYPE_IDENTIFIER && tokens[i + 1].type == TOKEN_TYPE_ASSIGN) { //assignment
 			ASTNode *assignment = malloc(sizeof(ASTNode));
@@ -196,4 +170,53 @@ ASTNode *tokens2AST(Token *tokens, int tokenCount) {
 		}
 	}
 
+}
+
+void printASTNode(ASTNode *node) {
+    if (node == NULL) {
+        return;
+    }
+    switch (node->type) {
+    case AST_FETCH_VARIABLE:
+        printf("Fetch Variable: %s\n", node->data.fetchVariable.variableName);
+        break;
+    case AST_VALUE:
+        if (node->data.value.type == VARIABLE_TYPE_INTEGER) {
+            printf("Value: %d\n", node->data.value.value.integer);
+        } else if (node->data.value.type == VARIABLE_TYPE_FLOAT) {
+            printf("Value: %f\n", node->data.value.value.floating);
+        } else {
+            printf("Unknown Value Type\n");
+        }
+        break;
+    case AST_CALCULATE:
+        switch (node->data.calculate.operation) {
+        case TOKEN_TYPE_PLUS:
+            printf("Operation: +\n");
+            break;
+        case TOKEN_TYPE_MINUS:
+            printf("Operation: -\n");
+            break;
+        case TOKEN_TYPE_MULTIPLY:
+            printf("Operation: *\n");
+            break;
+        case TOKEN_TYPE_DIVIDE:
+            printf("Operation: /\n");
+            break;
+        default:
+            printf("Unknown Operation\n");
+            break;
+        }
+        printf("Left Operand: \n");
+        printASTNode(node->data.calculate.leftOperand);
+        printf("Right Operand: \n");
+        printASTNode(node->data.calculate.rightOperand);
+        break;
+    case AST_ASSIGN_VARIABLE:
+        printf("Assign Variable: %s\n", node->data.assignVariable.variableName);
+        printASTNode(node->data.assignVariable.valueNode);
+        break;
+    default:
+        break;
+    }
 }

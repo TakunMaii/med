@@ -5,6 +5,7 @@
 #include "Register.h"
 #include "TextBuffer.h"
 #include "MedScript/Parser.h"
+#include "MedScript/AST.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
@@ -534,8 +535,13 @@ int main(int argc, char *argv[]) {
             printf("INFO: read input: %s\n", str);
             int tokenCount = 0;
             Token *tokens = parse(str, &tokenCount);
-            printf("INFO: parsed %d tokens\n", tokenCount);
+            printf("=======TOKENS=======\n");
             printTokens(tokens, tokenCount);
+            printf("=======TOKENS=======\n");
+            ASTNode *ast = tokens2AST(tokens, tokenCount);
+            printf("=======AST=======\n");
+            printASTNode(ast);
+            printf("=======AST=======\n");
         }
         exit(0);
     }

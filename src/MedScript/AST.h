@@ -55,5 +55,6 @@ typedef struct ASTNode {
 } ASTNode;
 
 ASTNode* tokens2AST(Token* tokens, int tokenCount);
+void printASTNode(ASTNode *node);
 
 #endif
