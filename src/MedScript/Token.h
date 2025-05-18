@@ -1,0 +1,51 @@
+#ifndef TOKEN_H
+#define TOKEN_H
+
+typedef enum{
+    TOKEN_TYPE_IDENTIFIER,
+
+    TOKEN_TYPE_LEFT_PARENTHESIS,
+    TOKEN_TYPE_RIGHT_PARENTHESIS,
+    TOKEN_TYPE_LEFT_BRACKET,
+    TOKEN_TYPE_RIGHT_BRACKET,
+    TOKEN_TYPE_COMMA,
+    TOKEN_TYPE_COLON,
+
+    TOKEN_TYPE_PLUS,
+    TOKEN_TYPE_MINUS,
+    TOKEN_TYPE_MULTIPLY,
+    TOKEN_TYPE_DIVIDE,
+    TOKEN_TYPE_EQUAL,
+    TOKEN_TYPE_UNEQUAL,
+    TOKEN_TYPE_LESS,
+    TOKEN_TYPE_GREATER,
+    TOKEN_TYPE_LESS_EQUAL,
+    TOKEN_TYPE_GREATER_EQUAL,
+    TOKEN_TYPE_STRING,
+    TOKEN_TYPE_NUMBER,
+    TOKEN_TYPE_FLOAT,
+
+    TOKEN_TYPE_ASSIGN,
+
+    TOKEN_TYPE_FUNCTION,
+    TOKEN_TYPE_IF,
+    TOKEN_TYPE_ELSE,
+    TOKEN_TYPE_ELSE_IF,
+    TOKEN_TYPE_WHILE,
+    TOKEN_TYPE_END,
+
+} TokenType;
+
+typedef union{
+    char identifier[64];
+    char string[256];
+    double floating;
+    long integer;
+} TokenValue;
+
+typedef struct {
+    TokenType type;
+    TokenValue value;
+} Token;
+
+#endif
