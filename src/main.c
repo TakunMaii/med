@@ -402,6 +402,11 @@ void fallbackKeyProcess(Key key) {
 			if (key.sym == SDLK_d) {
 				deleteBetween(textBuffer, cursorX, cursorY, pairCursorX, pairCursorY, theMode);
 				theMode = MODE_NORMAL;
+                if(pairCursorY < cursorY || (pairCursorY == cursorY && pairCursorX < cursorX))
+                {
+                    swap(&cursorX, &pairCursorX);
+                    swap(&cursorY, &pairCursorY);
+                }
 			}
 		}
 	} else if (theMode == MODE_INSERT) {
