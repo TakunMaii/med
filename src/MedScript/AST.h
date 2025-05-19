@@ -34,6 +34,9 @@ typedef enum{
     AST_BLOCK_END,
     AST_IF,
     AST_WHILE,
+    AST_RECYCLE,
+    AST_FUNCTION_ENTER,
+    AST_FUNCTION_CALL,
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -78,6 +81,21 @@ typedef struct ASTNode {
             struct ASTNode* condition;
             struct ASTNode* body;
         } whileNode;
+        // recycle
+        struct {
+            char variableName[64];
+        } recycle;
+        // function enter
+        struct {
+            int parameterCount;
+            char parameterNames[16][64];
+        } functionEnter;
+        // function call
+        struct {
+            int parameterCount;
+            char functionName[64];
+            struct ASTNode* parameters[16];
+        } functionCall;
     } data;
     ASTNodeType type;
 } ASTNode;

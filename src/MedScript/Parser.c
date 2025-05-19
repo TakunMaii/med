@@ -9,7 +9,7 @@ Token *parse(char *src, int *tokenCount) {
 	Token *tokens = malloc(sizeof(Token) * 1024);
 	*tokenCount = 0;
 	while (src[i] != '\0') {
-		if (src[i] == ' ' || src[i] == '\n') {
+		if (src[i] == ' ') {
 			i++;
 			continue;
 		} else if (src[i] == '#') {
@@ -121,6 +121,10 @@ Token *parse(char *src, int *tokenCount) {
 			i++;
 		} else if (src[i] == ',') {
 			tokens[*tokenCount].type = TOKEN_TYPE_COMMA;
+			(*tokenCount)++;
+			i++;
+		} else if (src[i] == '\n') {
+			tokens[*tokenCount].type = TOKEN_TYPE_NEWLINE;
 			(*tokenCount)++;
 			i++;
 		} else if (src[i] == '.') {
@@ -271,6 +275,8 @@ const char *tokenTypeToString(TokenType type) {
 			return "Right Brace";
 		case TOKEN_TYPE_COMMA:
 			return "Comma";
+        case TOKEN_TYPE_NEWLINE:
+            return "Newline";
 		case TOKEN_TYPE_DOT:
 			return "Dot";
 		case TOKEN_TYPE_LESS_EQUAL:

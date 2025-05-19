@@ -53,6 +53,43 @@ void freeASTNodeStack(ASTNodeStack *stack) {
 // reference: https://cloud.tencent.com/developer/article/1607240
 // TODO: problem to be fixed: consider the tokens are : 2 2 + + 2
 ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *stepForward) {
+	if (tokenCount == 0) {
+		*success = true;
+		return NULL;
+	}
+
+	if (tokens[0].type == TOKEN_TYPE_FUNCTION) {
+		int i = 2; // +2 for the function and left parenthesis
+		ASTNode *functionEnter = malloc(sizeof(ASTNode));
+		functionEnter->type = AST_FUNCTION_ENTER;
+		functionEnter->data.functionEnter.parameterCount = 0;
+		while (i < tokenCount && tokens[i].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+			if (tokens[i].type != TOKEN_TYPE_IDENTIFIER) {
+				printf("Error: expected identifier\n");
+				break;
+			}
+			strcpy(functionEnter->data.functionEnter.parameterNames[functionEnter->data.functionEnter.parameterCount++], tokens[i].value.identifier);
+			i++;
+			if (tokens[i].type == TOKEN_TYPE_COMMA) {
+				i++;
+			} else if (tokens[i].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+				printf("Error: expected comma or right parenthesis\n");
+				break;
+			}
+		}
+		if (i == tokenCount) {
+			printf("ERR: no matching right parenthesis\n");
+			exit(1);
+		}
+		i++; // +1 for the right parenthesis
+        bool localSuccess;
+        int localStepForward;
+		functionEnter->next = tokens2AST(tokens + i, tokenCount - i, &localSuccess, &localStepForward);
+        i += localStepForward;
+        *stepForward = i;
+        return functionEnter;
+	}
+
 	*stepForward = 0;
 	*success = false;
 
@@ -420,7 +457,11 @@ ASTNode *tryFindValueNode(Token *tokens, int tokenCount, bool *success, int *ste
 	if (valueStack->ptr != 1) {
 		printf("WARN: ASTNodeStack valueStack size is not 1\n");
 	}
-	return popASTNode(valueStack);
+	ASTNode *res = popASTNode(valueStack);
+	res->next = NULL;
+	free(operatorStack);
+	free(valueStack);
+	return res;
 }
 
 ASTNode *tokens2AST(Token *tokens, int tokenCount, bool *success, int *stepForward) {
@@ -434,7 +475,69 @@ ASTNode *tokens2AST(Token *tokens, int tokenCount, bool *success, int *stepForwa
 
 	int i = 0;
 	while (i < tokenCount) {
-		if (tokens[i].type == TOKEN_TYPE_IDENTIFIER && tokens[i + 1].type == TOKEN_TYPE_ASSIGN) { //assignment
+		if (tokens[i].type == TOKEN_TYPE_FUNCTION) {
+			ASTNode *assignment = malloc(sizeof(ASTNode));
+			assignment->type = AST_ASSIGN_VARIABLE;
+			i++; //jump FUNCITON token
+			strcpy(assignment->data.assignVariable.variableName, tokens[i].value.identifier);
+			bool success;
+			int stepForward;
+
+			i += 2; // +2 for the identifier and left parenthesis
+			ASTNode *functionEnter = malloc(sizeof(ASTNode));
+			functionEnter->type = AST_FUNCTION_ENTER;
+			functionEnter->data.functionEnter.parameterCount = 0;
+			while (i < tokenCount && tokens[i].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+				if (tokens[i].type != TOKEN_TYPE_IDENTIFIER) {
+					printf("Error: expected identifier\n");
+					break;
+				}
+				strcpy(functionEnter->data.functionEnter.parameterNames[functionEnter->data.functionEnter.parameterCount++], tokens[i].value.identifier);
+				i++;
+				if (tokens[i].type == TOKEN_TYPE_COMMA) {
+					i++;
+				} else if (tokens[i].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+					printf("Error: expected comma or right parenthesis\n");
+					break;
+				}
+			}
+			if (i == tokenCount) {
+				printf("ERR: no matching right parenthesis\n");
+				exit(1);
+			}
+			i++; // +1 for the right parenthesis
+			functionEnter->next = tokens2AST(tokens + i, tokenCount - i, &success, &stepForward);
+			i += stepForward;
+			assignment->data.assignVariable.valueNode = functionEnter;
+			current->next = assignment;
+			current = assignment;
+		} else if (tokens[i].type == TOKEN_TYPE_IDENTIFIER && tokens[i + 1].type == TOKEN_TYPE_LEFT_PARENTHESIS) { // function call
+			ASTNode *functionCall = malloc(sizeof(ASTNode));
+			functionCall->type = AST_FUNCTION_CALL;
+			strcpy(functionCall->data.functionCall.functionName, tokens[i].value.identifier);
+			i += 2; // +2 for the identifier and left parenthesis
+			functionCall->data.functionCall.parameterCount = 0;
+			while (i < tokenCount && tokens[i].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+				bool success;
+				int stepForward;
+				ASTNode *parameter = tryFindValueNode(tokens + i, tokenCount - i, &success, &stepForward);
+				functionCall->data.functionCall.parameters[functionCall->data.functionCall.parameterCount++] = parameter;
+				i += stepForward;
+				if (tokens[i].type == TOKEN_TYPE_COMMA) {
+					i++;
+				} else if (tokens[i].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+					printf("Error: expected comma or right parenthesis\n");
+					break;
+				}
+			}
+			if (i == tokenCount) {
+				printf("ERR: no matching right parenthesis\n");
+				exit(1);
+			}
+			i++; // +1 for the right parenthesis
+			current->next = functionCall;
+			current = functionCall;
+		} else if (tokens[i].type == TOKEN_TYPE_IDENTIFIER && tokens[i + 1].type == TOKEN_TYPE_ASSIGN) { //assignment
 			ASTNode *assignment = malloc(sizeof(ASTNode));
 			assignment->type = AST_ASSIGN_VARIABLE;
 			strcpy(assignment->data.assignVariable.variableName, tokens[i].value.identifier);
@@ -496,29 +599,36 @@ ASTNode *tokens2AST(Token *tokens, int tokenCount, bool *success, int *stepForwa
 			current->next = ifNode;
 			current = ifNode;
 		} else if (tokens[i].type == TOKEN_TYPE_WHILE) {
-            ASTNode *whileNode = malloc(sizeof(ASTNode));
-            whileNode->type = AST_WHILE;
-            int rigtParenthesisIndex = i + 2;
-            while (rigtParenthesisIndex < tokenCount && tokens[rigtParenthesisIndex].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
-                rigtParenthesisIndex++;
-            }
-            if (rigtParenthesisIndex == tokenCount) {
-                printf("ERR: no matching right parenthesis\n");
-                exit(1);
-            }
-            bool success;
-            int stepForward;
-            whileNode->data.whileNode.condition = tryFindValueNode(tokens + i + 2, rigtParenthesisIndex - i - 2, &success, &stepForward);
-            i += stepForward + 3; // +3 for the while token and left and right parenthesis
-            // now i is at the first token after the right parenthesis
-            ASTNode *body = tokens2AST(tokens + i, tokenCount - i, &success, &stepForward);
-            whileNode->data.whileNode.body = body;
-            i += stepForward;
-            current->next = whileNode;
-            current = whileNode;
-        } else if (tokens[i].type == TOKEN_TYPE_COMMA) {
-            i++;
-            continue;
+			ASTNode *whileNode = malloc(sizeof(ASTNode));
+			whileNode->type = AST_WHILE;
+			int rigtParenthesisIndex = i + 2;
+			while (rigtParenthesisIndex < tokenCount && tokens[rigtParenthesisIndex].type != TOKEN_TYPE_RIGHT_PARENTHESIS) {
+				rigtParenthesisIndex++;
+			}
+			if (rigtParenthesisIndex == tokenCount) {
+				printf("ERR: no matching right parenthesis\n");
+				exit(1);
+			}
+			bool success;
+			int stepForward;
+			whileNode->data.whileNode.condition = tryFindValueNode(tokens + i + 2, rigtParenthesisIndex - i - 2, &success, &stepForward);
+			i += stepForward + 3; // +3 for the while token and left and right parenthesis
+			// now i is at the first token after the right parenthesis
+			ASTNode *body = tokens2AST(tokens + i, tokenCount - i, &success, &stepForward);
+			whileNode->data.whileNode.body = body;
+			i += stepForward;
+			current->next = whileNode;
+			current = whileNode;
+		} else if (tokens[i].type == TOKEN_TYPE_RECYCLE && tokens[i + 1].type == TOKEN_TYPE_IDENTIFIER) { // recycle statement
+			ASTNode *recycleNode = malloc(sizeof(ASTNode));
+			recycleNode->type = AST_RECYCLE;
+			strcpy(recycleNode->data.recycle.variableName, tokens[i + 1].value.identifier);
+			i += 2; // +2 for the recycle token and identifier
+			current->next = recycleNode;
+			current = recycleNode;
+		} else if (tokens[i].type == TOKEN_TYPE_COMMA || tokens[i].type == TOKEN_TYPE_NEWLINE) {
+			i++;
+			continue;
 		} else if (tokens[i].type == TOKEN_TYPE_END || tokens[i].type == TOKEN_TYPE_ELSE ||
 				tokens[i].type == TOKEN_TYPE_ELSE_IF) {
 			if (tokens[i].type == TOKEN_TYPE_END) {
@@ -623,19 +733,36 @@ void printSingleASTNode(ASTNode *node) {
 				printASTNode(node->data.ifNode.falseBlock);
 			}
 			break;
-        case AST_WHILE:
-            printf("While Statement:\n");
-            printf("Condition:\n");
-            printASTNode(node->data.whileNode.condition);
-            printf("Body:\n");
-            printASTNode(node->data.whileNode.body);
-            break;
+		case AST_WHILE:
+			printf("While Statement:\n");
+			printf("Condition:\n");
+			printASTNode(node->data.whileNode.condition);
+			printf("Body:\n");
+			printASTNode(node->data.whileNode.body);
+			break;
 		case AST_BLOCK_START:
 			printf("Block Start:\n");
 			break;
 		case AST_BLOCK_END:
 			printf("Block End:\n");
 			break;
+		case AST_RECYCLE:
+			printf("Recycle Variable: %s\n", node->data.recycle.variableName);
+			break;
+		case AST_FUNCTION_ENTER:
+			printf("Function Enter:\n");
+			printf("Parameter Count: %d\n", node->data.functionEnter.parameterCount);
+			for (int i = 0; i < node->data.functionEnter.parameterCount; i++) {
+				printf("Parameter %d: %s\n", i + 1, node->data.functionEnter.parameterNames[i]);
+			}
+			break;
+		case AST_FUNCTION_CALL:
+			printf("Function Call: %s\n", node->data.functionCall.functionName);
+			printf("Parameter Count: %d\n", node->data.functionCall.parameterCount);
+			for (int i = 0; i < node->data.functionCall.parameterCount; i++) {
+				printf("Parameter %d: \n", i + 1);
+				printASTNode(node->data.functionCall.parameters[i]);
+			}
 		default:
 			break;
 	}
