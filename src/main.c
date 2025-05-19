@@ -538,7 +538,9 @@ int main(int argc, char *argv[]) {
             printf("=======TOKENS=======\n");
             printTokens(tokens, tokenCount);
             printf("=======TOKENS=======\n");
-            ASTNode *ast = tokens2AST(tokens, tokenCount);
+            bool success = true;
+            int stepForward = 0;
+            ASTNode *ast = tokens2AST(tokens, tokenCount, &success, &stepForward);
             printf("=======AST=======\n");
             printASTNode(ast);
             printf("=======AST=======\n");

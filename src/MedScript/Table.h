@@ -20,7 +20,7 @@ typedef struct {
     int max_count;
 } Table;
 
-Table* table();
+Table* tableCreate(void);
 
 void tableFree(Table *table);
 

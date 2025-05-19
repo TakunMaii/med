@@ -3,6 +3,7 @@
 
 #include "Table.h"
 #include "Token.h"
+#include <stdbool.h>
 
 typedef enum{
     VARIABLE_TYPE_STRING,
@@ -20,15 +21,23 @@ typedef union{
     Table table;
 } VariableValue;
 
+typedef struct{
+    Table* localVariables;
+} CodeBlockControlBlock;
+
 typedef enum{
     AST_ASSIGN_VARIABLE,
     AST_VALUE,
     AST_FETCH_VARIABLE,
     AST_CALCULATE,
+    AST_BLOCK_START,
+    AST_BLOCK_END,
+    AST_IF,
+    AST_WHILE,
 } ASTNodeType;
 
 typedef struct ASTNode {
-    struct ASTNode* nextNode;
+    struct ASTNode* next;
     union {
         // Variable assignment
         struct{
@@ -50,11 +59,30 @@ typedef struct ASTNode {
             struct ASTNode* leftOperand;
             struct ASTNode* rightOperand;
         } calculate;
+        // Block start
+        struct {
+            CodeBlockControlBlock* controlBlock;
+        } blockStart;
+        // Block end
+        struct {
+            CodeBlockControlBlock* controlBlock;
+        } blockEnd;
+        //if
+        struct {
+            struct ASTNode* condition;
+            struct ASTNode* trueBlock;
+            struct ASTNode* falseBlock;
+        } ifNode;
+        // while
+        struct {
+            struct ASTNode* condition;
+            struct ASTNode* body;
+        } whileNode;
     } data;
     ASTNodeType type;
 } ASTNode;
 
-ASTNode* tokens2AST(Token* tokens, int tokenCount);
+ASTNode* tokens2AST(Token* tokens, int tokenCount, bool *success, int *stepForward);
 void printASTNode(ASTNode *node);
 
 #endif

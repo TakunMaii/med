@@ -79,6 +79,18 @@ Token *parse(char *src, int *tokenCount) {
 			tokens[*tokenCount].type = TOKEN_TYPE_MULTIPLY;
 			(*tokenCount)++;
 			i++;
+		} else if (src[i] == '&') {
+			tokens[*tokenCount].type = TOKEN_TYPE_AND;
+			(*tokenCount)++;
+			i++;
+		} else if (src[i] == '|') {
+			tokens[*tokenCount].type = TOKEN_TYPE_OR;
+			(*tokenCount)++;
+			i++;
+		} else if (src[i] == '!') {
+			tokens[*tokenCount].type = TOKEN_TYPE_NOT;
+			(*tokenCount)++;
+			i++;
 		} else if (src[i] == '/') {
 			tokens[*tokenCount].type = TOKEN_TYPE_DIVIDE;
 			(*tokenCount)++;
@@ -265,6 +277,12 @@ const char *tokenTypeToString(TokenType type) {
 			return "Less Equal";
 		case TOKEN_TYPE_LESS:
 			return "Less";
+        case TOKEN_TYPE_AND:
+            return "And";
+        case TOKEN_TYPE_OR:
+            return "Or";
+        case TOKEN_TYPE_NOT:
+            return "Not";
 		case TOKEN_TYPE_GREATER_EQUAL:
 			return "Greater Equal";
 		case TOKEN_TYPE_GREATER:

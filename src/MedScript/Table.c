@@ -34,10 +34,11 @@ void tableResize(Table *table, int new_max_count) {
 	table->max_count = new_max_count;
 }
 
-Table *table() {
+Table *tableCreate(void) {
 	Table *table = malloc(sizeof(Table));
 	table->max_count = 17;
 	table->count = 0;
+    table->content = malloc(sizeof(TableUnit) * table->max_count);
 	for (int i = 0; i < table->max_count; i++) {
 		table->content[i].key[0] = '\0';
 	}
