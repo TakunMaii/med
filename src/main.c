@@ -6,6 +6,7 @@
 #include "TextBuffer.h"
 #include "MedScript/Parser.h"
 #include "MedScript/AST.h"
+#include "MedScript/Table.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keycode.h>
@@ -16,6 +17,7 @@
 #include <SDL2/SDL_video.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <threads.h>
 
 #define WINDOW_WIDTH 640
@@ -524,6 +526,13 @@ void moveCursor(float *cursorPosX, float *cursorPosY, const TTF_Font *font) {
 	*cursorPosY = textPanel.posY + textPanelBiasY + cursorY * (TTF_FontHeight(font) + lineSpace);
 }
 
+void ASTprint(ASTNode* param, Table **env, int layer)
+{
+    printf("INFO: ASTprint\n");
+    Variable returnVar = runAST(param, env, layer);
+    printVariable(returnVar);
+}
+
 int main(int argc, char *argv[]) {
     // if there is -ms option, read the rest of the line as a script
     if (argc > 1 && strcmp(argv[1], "-ms") == 0) {
@@ -542,8 +551,23 @@ int main(int argc, char *argv[]) {
             int stepForward = 0;
             ASTNode *ast = tokens2AST(tokens, tokenCount, &success, &stepForward);
             printf("=======AST=======\n");
-            printASTNode(ast);
+            printASTNode(ast, 0);
             printf("=======AST=======\n");
+            Table *globalTable[16] = {NULL};
+            globalTable[0] = tableCreate();
+
+            ASTNode *printNode = malloc(sizeof(ASTNode));
+            printNode->type = AST_CALL_C_FUNCTION;
+            printNode->data.callCFunction.func = ASTprint;
+            TableUnitValue value = {
+                .pointer = printNode,
+            };
+            tableAdd(globalTable[0], "print", value, TABLE_UNIT_FUNCTION);
+
+            Variable returnVar = runAST(ast, globalTable, 0);
+            printf("=======RETURN=======\n");
+            printVariable(returnVar);
+            freeASTNode(ast);
         }
         exit(0);
     }

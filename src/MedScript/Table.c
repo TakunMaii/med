@@ -7,12 +7,13 @@
 TableUnit *tableFindUnit(Table *table, char *key, bool *empty);
 
 int hash(char *str) {
-	int hash = 0;
+	int res = 0;
 	int p = 0;
 	while (str[p] != '\0') {
-		hash = (hash << 5) + str[p];
+		res = res * res + (res * (int)str[p] * 3) + (int)str[p];
+        p++;
 	}
-	return hash;
+	return res;
 }
 
 void tableResize(Table *table, int new_max_count) {
@@ -36,7 +37,7 @@ void tableResize(Table *table, int new_max_count) {
 
 Table *tableCreate(void) {
 	Table *table = malloc(sizeof(Table));
-	table->max_count = 17;
+	table->max_count = 97;
 	table->count = 0;
     table->content = malloc(sizeof(TableUnit) * table->max_count);
 	for (int i = 0; i < table->max_count; i++) {
@@ -50,6 +51,19 @@ void tableFree(Table *table) {
 	free(table);
 }
 
+bool tableExist(Table *table, char *key) {
+	int index = hash(key) % table->max_count;
+	int counter = 0;
+	while (counter <= table->max_count) {
+		if (strcmp(table->content[index].key, key) == 0) {
+            return true;
+		}
+		index = (index + 1) % table->max_count;
+		counter++;
+	}
+    return false;
+}
+
 TableUnit *tableFindUnit(Table *table, char *key, bool *empty) {
 	int index = hash(key) % table->max_count;
 	int counter = 0;
@@ -61,6 +75,7 @@ TableUnit *tableFindUnit(Table *table, char *key, bool *empty) {
 		index = (index + 1) % table->max_count;
 		counter++;
 		if (counter > table->max_count) {
+            printf("INFO: (In tableFindUnit) Table is full, resizing.\n");
 			counter = 0;
 			tableResize(table, table->max_count * 2 + 1);
 			index = hash(key) % table->max_count;
@@ -70,7 +85,7 @@ TableUnit *tableFindUnit(Table *table, char *key, bool *empty) {
 	return &table->content[index];
 }
 
-void tableAdd(Table *table, char *key, TableUnitValue value) {
+void tableAdd(Table *table, char *key, TableUnitValue value, TableUnitType type) {
     bool empty;
     TableUnit *unit = tableFindUnit(table, key, &empty);
     if (empty) {
@@ -80,16 +95,13 @@ void tableAdd(Table *table, char *key, TableUnitValue value) {
     }
     strcpy(unit->key, key);
     unit->value = value;
+    unit->type = type;
 }
 
-TableUnitValue tableGet(Table *table, char *key)
+TableUnit tableGet(Table *table, char *key, bool *empty)
 {
-    bool empty;
-    TableUnit *unit = tableFindUnit(table, key, &empty);
-    if (empty) {
-        printf("ERROR: (In tableGet) Key %s not found, returned value will be unpredictable.\n", key);
-    }
-    return unit->value;
+    TableUnit *unit = tableFindUnit(table, key, empty);
+    return *unit;
 }
 
 void tableRemove(Table *table, char *key)

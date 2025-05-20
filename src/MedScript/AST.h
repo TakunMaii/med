@@ -11,6 +11,7 @@ typedef enum{
     VARIABLE_TYPE_FLOAT,
     VARIABLE_TYPE_FUNCTION,
     VARIABLE_TYPE_TABLE,
+    VARIABLE_TYPE_NULL,
 } VariableType;
 
 typedef union{
@@ -18,8 +19,13 @@ typedef union{
     int integer;
     float floating;
     void* function;
-    Table table;
+    Table *table;
 } VariableValue;
+
+typedef struct{
+    VariableType type;
+    VariableValue value;
+} Variable;
 
 typedef struct{
     Table* localVariables;
@@ -34,9 +40,13 @@ typedef enum{
     AST_BLOCK_END,
     AST_IF,
     AST_WHILE,
+    AST_CONTINUE,
+    AST_BREAK,
+    AST_RETURN,
     AST_RECYCLE,
     AST_FUNCTION_ENTER,
     AST_FUNCTION_CALL,
+    AST_CALL_C_FUNCTION,
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -65,10 +75,12 @@ typedef struct ASTNode {
         // Block start
         struct {
             CodeBlockControlBlock* controlBlock;
+            struct ASTNode* endAST;
         } blockStart;
         // Block end
         struct {
             CodeBlockControlBlock* controlBlock;
+            struct ASTNode* startAST;
         } blockEnd;
         //if
         struct {
@@ -89,6 +101,7 @@ typedef struct ASTNode {
         struct {
             int parameterCount;
             char parameterNames[16][64];
+            struct ASTNode* body;
         } functionEnter;
         // function call
         struct {
@@ -96,11 +109,28 @@ typedef struct ASTNode {
             char functionName[64];
             struct ASTNode* parameters[16];
         } functionCall;
+        //continue or break
+        struct{
+            struct ASTNode* body;
+        } continueOrBreak;
+        // return
+        struct{
+            struct ASTNode* returnValue;
+        } returnNode;
+        //call c function
+        struct {
+            void (*func)(struct ASTNode* parameter, Table **globalVariables, int globalLayerCount);
+        } callCFunction;
     } data;
     ASTNodeType type;
 } ASTNode;
 
 ASTNode* tokens2AST(Token* tokens, int tokenCount, bool *success, int *stepForward);
-void printASTNode(ASTNode *node);
+void printASTNode(ASTNode *node, int indent);
+Variable runAST(ASTNode* node, Table **globalVariables, int globalLayerCount);
+void freeASTNode(ASTNode *node);
+TableUnitType ASTVariableTypeToTableUnitType(VariableType type);
+VariableType TableUnitTypeToASTVariableType(TableUnitType type);
+void printVariable(Variable var);
 
 #endif

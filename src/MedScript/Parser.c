@@ -63,6 +63,7 @@ Token *parse(char *src, int *tokenCount) {
 				}
 				i++;
 			}
+            i++; // Skip closing quote
 			string[j] = '\0';
 			tokens[*tokenCount].type = TOKEN_TYPE_STRING;
 			memcpy(tokens[*tokenCount].value.string, string, strlen(string) + 1);
