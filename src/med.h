@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <regex.h>
 
 #ifndef MED_SHADER_DIR
 #define MED_SHADER_DIR "."
@@ -43,6 +44,9 @@
 #define EDITOR_COMMAND_MAX 2048
 #define EDITOR_STATUS_MAX 2048
 #define EDITOR_LAST_INSERT_MAX 512
+#define EDITOR_REPLAY_MAX_EVENTS 512
+#define EDITOR_MACRO_MAX_EVENTS 1024
+#define EDITOR_MACRO_REPLAY_LIMIT 10000
 #define MED_PARSE_MAX_BYTES (2u * 1024u * 1024u)
 #define MED_UNDO_SNAPSHOT_MAX_BYTES (2u * 1024u * 1024u)
 
@@ -160,6 +164,24 @@ typedef struct {
     int root;
 } EditorTab;
 
+typedef enum {
+    REPLAY_KEY,
+    REPLAY_CHAR,
+    REPLAY_WAITING_CHAR
+} ReplayEventKind;
+
+typedef struct {
+    ReplayEventKind kind;
+    int key;
+    int mods;
+    unsigned int cp;
+} ReplayEvent;
+
+typedef struct {
+    ReplayEvent events[EDITOR_MACRO_MAX_EVENTS];
+    size_t len;
+} MacroRegister;
+
 typedef struct {
     Text text;
     char path[512];
@@ -200,6 +222,27 @@ typedef struct {
     bool last_visual_line;
     bool last_visual_block;
     char pending_register;
+    ReplayEvent last_change_events[EDITOR_REPLAY_MAX_EVENTS];
+    size_t last_change_event_len;
+    ReplayEvent current_change_events[EDITOR_REPLAY_MAX_EVENTS];
+    size_t current_change_event_len;
+    bool building_change;
+    bool suppress_change_record;
+    bool replaying;
+    MacroRegister macros[26];
+    bool macro_recording;
+    char macro_record_register;
+    char last_macro_register;
+    int macro_replay_depth;
+    int macro_replay_steps;
+    bool block_insert_active;
+    bool block_insert_append;
+    int block_insert_line0;
+    int block_insert_line1;
+    int block_insert_col;
+    size_t block_insert_primary_start;
+    char block_insert_text[EDITOR_LAST_INSERT_MAX];
+    size_t block_insert_len;
     bool marks_set[26];
     size_t marks[26];
     Text yank;

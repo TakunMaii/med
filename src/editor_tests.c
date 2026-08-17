@@ -431,6 +431,66 @@ static void test_ctrl_w_cycle_and_quit_window(void) {
     assert(e.tabs[0].view_count == 1);
 }
 
+static void test_macro_record_and_replay(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\n", 0);
+
+    editor_key(&e, GLFW_KEY_Q, 0, 20);
+    editor_handle_waiting_char(&e, 'a');
+    editor_key(&e, GLFW_KEY_X, 0, 20);
+    editor_key(&e, GLFW_KEY_Q, 0, 20);
+    editor_key(&e, GLFW_KEY_2, GLFW_MOD_SHIFT, 20);
+    editor_handle_waiting_char(&e, 'a');
+    editor_key(&e, GLFW_KEY_2, GLFW_MOD_SHIFT, 20);
+    editor_handle_waiting_char(&e, '@');
+
+    assert(strcmp(e.text.data, "\n") == 0);
+}
+
+static void test_dot_replays_operator_change(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one two\n", 0);
+
+    editor_key(&e, GLFW_KEY_D, 0, 20);
+    editor_key(&e, GLFW_KEY_W, 0, 20);
+    editor_key(&e, GLFW_KEY_PERIOD, 0, 20);
+
+    assert(strcmp(e.text.data, "") == 0);
+}
+
+static void test_visual_block_insert_and_append(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "aa\nbb\n", 0);
+
+    editor_key(&e, GLFW_KEY_V, GLFW_MOD_CONTROL, 20);
+    editor_key(&e, GLFW_KEY_DOWN, 0, 20);
+    editor_key(&e, GLFW_KEY_I, GLFW_MOD_SHIFT, 20);
+    editor_insert_char(&e, '>');
+    editor_key(&e, GLFW_KEY_ESCAPE, 0, 20);
+    assert(strcmp(e.text.data, ">aa\n>bb\n") == 0);
+
+    editor_key(&e, GLFW_KEY_V, GLFW_MOD_CONTROL, 20);
+    editor_key(&e, GLFW_KEY_DOWN, 0, 20);
+    editor_key(&e, GLFW_KEY_A, GLFW_MOD_SHIFT, 20);
+    editor_insert_char(&e, '<');
+    editor_key(&e, GLFW_KEY_ESCAPE, 0, 20);
+    assert(strcmp(e.text.data, ">aa<\n>bb<\n") == 0);
+}
+
+static void test_regex_substitute_and_global(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "foo1\nfoo22\nbar\n", 0);
+
+    execute_command(&e, "%s/foo[0-9]+/X&/g");
+    assert(strcmp(e.text.data, "Xfoo1\nXfoo22\nbar\n") == 0);
+    execute_command(&e, "g/^Xfoo[0-9]+$/d");
+    assert(strcmp(e.text.data, "bar\n") == 0);
+}
+
 static void test_visual_block_delete(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -526,6 +586,10 @@ int main(void) {
     test_visual_block_replace();
     test_gt_and_gT_switch_tabs();
     test_ctrl_w_cycle_and_quit_window();
+    test_macro_record_and_replay();
+    test_dot_replays_operator_change();
+    test_visual_block_insert_and_append();
+    test_regex_substitute_and_global();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();

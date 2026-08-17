@@ -1,5 +1,7 @@
 #include "med.h"
 
+static void editor_set_status(Editor *e, const char *msg);
+
 static void editor_move_to_line_col(Editor *e, int line, int col) {
     if (line < 0) line = 0;
     int lc = line_count(&e->text);
@@ -10,6 +12,72 @@ static void editor_move_to_line_col(Editor *e, int line, int col) {
     if (pos > end) pos = end;
     e->cursor = pos;
     if (e->mode != MODE_INSERT) e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
+}
+
+static bool editor_event_changes_text(ReplayEvent ev) {
+    if (ev.kind == REPLAY_CHAR) return true;
+    if (ev.kind == REPLAY_WAITING_CHAR) return true;
+    if (ev.kind != REPLAY_KEY) return false;
+    if (ev.key == GLFW_KEY_ESCAPE) return true;
+    if (ev.key == GLFW_KEY_ENTER || ev.key == GLFW_KEY_BACKSPACE) return true;
+    if (ev.key == GLFW_KEY_U && !(ev.mods & GLFW_MOD_CONTROL)) return false;
+    return true;
+}
+
+static void replay_buffer_push(ReplayEvent *events, size_t *len, size_t cap, ReplayEvent ev) {
+    if (*len >= cap) return;
+    events[(*len)++] = ev;
+}
+
+static void editor_macro_record_event(Editor *e, ReplayEvent ev) {
+    if (!e->macro_recording || e->replaying) return;
+    if (e->macro_record_register < 'a' || e->macro_record_register > 'z') return;
+    MacroRegister *m = &e->macros[e->macro_record_register - 'a'];
+    replay_buffer_push(m->events, &m->len, EDITOR_MACRO_MAX_EVENTS, ev);
+}
+
+static void editor_begin_recorded_change(Editor *e) {
+    if (e->suppress_change_record || e->replaying) return;
+    e->building_change = true;
+    e->current_change_event_len = 0;
+}
+
+static void editor_record_change_event(Editor *e, ReplayEvent ev) {
+    if (e->suppress_change_record || e->replaying || !e->building_change) return;
+    replay_buffer_push(e->current_change_events, &e->current_change_event_len, EDITOR_REPLAY_MAX_EVENTS, ev);
+}
+
+static void editor_commit_recorded_change(Editor *e) {
+    if (e->suppress_change_record || e->replaying || !e->building_change) return;
+    if (e->current_change_event_len > 0) {
+        memcpy(e->last_change_events, e->current_change_events, e->current_change_event_len * sizeof(e->current_change_events[0]));
+        e->last_change_event_len = e->current_change_event_len;
+    }
+    e->building_change = false;
+    e->current_change_event_len = 0;
+}
+
+static void editor_cancel_recorded_change(Editor *e) {
+    e->building_change = false;
+    e->current_change_event_len = 0;
+}
+
+static bool editor_execute_event(Editor *e, ReplayEvent ev, int rows);
+
+static void editor_replay_events(Editor *e, const ReplayEvent *events, size_t len, int rows) {
+    if (len == 0 || e->macro_replay_depth > 8) return;
+    e->macro_replay_depth++;
+    bool old_replaying = e->replaying;
+    e->replaying = true;
+    for (size_t i = 0; i < len; i++) {
+        if (++e->macro_replay_steps > EDITOR_MACRO_REPLAY_LIMIT) {
+            editor_set_status(e, "Replay stopped");
+            break;
+        }
+        editor_execute_event(e, events[i], rows);
+    }
+    e->replaying = old_replaying;
+    e->macro_replay_depth--;
 }
 
 static void editor_move_left(Editor *e) {
@@ -1005,6 +1073,10 @@ static void editor_yank_range(Editor *e, size_t start, size_t end);
 
 void editor_insert_char(Editor *e, unsigned int cp) {
     if (cp < 32 || cp > 126) return;
+    ReplayEvent ev = {.kind = REPLAY_CHAR, .cp = cp};
+    editor_macro_record_event(e, ev);
+    if (!e->building_change && !e->replaying) editor_begin_recorded_change(e);
+    editor_record_change_event(e, ev);
     editor_begin_insert_change(e);
     char c = (char)cp;
     text_insert(&e->text, e->cursor, &c, 1);
@@ -1212,6 +1284,47 @@ static void editor_replace_visual_block(Editor *e, char ch) {
     editor_reparse(e);
 }
 
+static void editor_start_block_insert(Editor *e, bool append) {
+    int line0, line1, col0, col1;
+    visual_block_bounds(e, &line0, &line1, &col0, &col1);
+    e->block_insert_active = true;
+    e->block_insert_append = append;
+    e->block_insert_line0 = line0;
+    e->block_insert_line1 = line1;
+    e->block_insert_col = append ? col1 + 1 : col0;
+    e->block_insert_len = 0;
+    e->block_insert_text[0] = 0;
+    e->cursor = line_col_to_pos(&e->text, byte_line(&e->text, e->cursor), e->block_insert_col);
+    e->block_insert_primary_start = e->cursor;
+    e->mode = MODE_INSERT;
+    e->visual_block = false;
+    e->visual_line = false;
+    e->suppress_next_char = true;
+}
+
+static void editor_finish_block_insert(Editor *e) {
+    if (!e->block_insert_active) return;
+    size_t start = e->block_insert_primary_start;
+    size_t end = e->cursor;
+    if (end < start) end = start;
+    if (end > e->text.len) end = e->text.len;
+    size_t n = end - start;
+    if (n >= sizeof(e->block_insert_text)) n = sizeof(e->block_insert_text) - 1;
+    if (n > 0) {
+        memcpy(e->block_insert_text, e->text.data + start, n);
+        e->block_insert_text[n] = 0;
+        e->block_insert_len = n;
+        int primary = byte_line(&e->text, start);
+        for (int line = e->block_insert_line1; line >= e->block_insert_line0; line--) {
+            if (line == primary) continue;
+            size_t pos = line_col_to_pos(&e->text, line, e->block_insert_col);
+            text_insert(&e->text, pos, e->block_insert_text, e->block_insert_len);
+        }
+        editor_reparse(e);
+    }
+    e->block_insert_active = false;
+}
+
 static void editor_paste_block(Editor *e, bool before) {
     if (!e->has_yank || !e->yank_blockwise || e->yank.len == 0) return;
     int start_line = byte_line(&e->text, e->cursor);
@@ -1402,7 +1515,10 @@ static void editor_join_lines(Editor *e, int count) {
 }
 
 static void editor_repeat_change(Editor *e) {
-    if (strcmp(e->last_change, "insert") == 0 && e->last_insert_len > 0) {
+    if (e->last_change_event_len > 0) {
+        e->macro_replay_steps = 0;
+        editor_replay_events(e, e->last_change_events, e->last_change_event_len, 20);
+    } else if (strcmp(e->last_change, "insert") == 0 && e->last_insert_len > 0) {
         editor_begin_change(e);
         text_insert(&e->text, e->cursor, e->last_insert, e->last_insert_len);
         e->cursor += e->last_insert_len;
@@ -1570,6 +1686,7 @@ static void editor_finish_operator(Editor *e, char motion, int motion_count, boo
     e->count = 0;
     e->pending = 0;
     e->pending_register = 0;
+    editor_commit_recorded_change(e);
 }
 
 static bool editor_word_object(Editor *e, bool around, size_t *a, size_t *b) {
@@ -1753,6 +1870,7 @@ static char key_to_motion_char(int key, bool shift) {
         char c = (char)('a' + key - GLFW_KEY_A);
         return shift ? (char)toupper((unsigned char)c) : c;
     }
+    if (key == GLFW_KEY_2 && shift) return '@';
     if (key == GLFW_KEY_4 && shift) return '$';
     if (key == GLFW_KEY_6 && shift) return '^';
     if (key == GLFW_KEY_5 && shift) return '%';
@@ -1774,8 +1892,12 @@ static char key_to_motion_char(int key, bool shift) {
 
 void editor_key(Editor *e, int key, int mods, int rows) {
     bool shift = (mods & GLFW_MOD_SHIFT) != 0;
+    ReplayEvent ev = {.kind = REPLAY_KEY, .key = key, .mods = mods};
     if (key != GLFW_KEY_LEFT_SHIFT && key != GLFW_KEY_RIGHT_SHIFT) e->status[0] = 0;
     if (key == GLFW_KEY_ESCAPE) {
+        editor_macro_record_event(e, ev);
+        editor_record_change_event(e, ev);
+        if (e->mode == MODE_INSERT && e->block_insert_active) editor_finish_block_insert(e);
         if (e->mode == MODE_INSERT) editor_finish_insert_change(e);
         if (e->mode == MODE_VISUAL) editor_remember_visual(e);
         if (e->mode == MODE_INSERT && e->cursor > 0) e->cursor--;
@@ -1792,9 +1914,13 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->command[0] = 0;
         e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
         e->desired_col = byte_col(&e->text, e->cursor);
+        editor_commit_recorded_change(e);
         return;
     }
     if (e->mode == MODE_INSERT) {
+        editor_macro_record_event(e, ev);
+        if (!e->building_change && editor_event_changes_text(ev) && !e->replaying) editor_begin_recorded_change(e);
+        editor_record_change_event(e, ev);
         if (key == GLFW_KEY_BACKSPACE) editor_backspace(e);
         else if (key == GLFW_KEY_ENTER) editor_newline(e);
         else if (key == GLFW_KEY_LEFT) editor_move_left(e);
@@ -1805,12 +1931,8 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     }
     char c = key_to_motion_char(key, shift);
     if (!c) return;
-    if (c == '"') {
-        e->waiting_char = '"';
-        e->suppress_next_char = true;
-        return;
-    }
     if (e->window_pending) {
+        editor_macro_record_event(e, ev);
         if (c == 's') editor_split_current(e, false, NULL);
         else if (c == 'v') editor_split_current(e, true, NULL);
         else if (c == 'c' || c == 'q') editor_close_view(e, false);
@@ -1819,6 +1941,36 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         else if (c == 'h' || c == 'j' || c == 'k' || c == 'l') editor_focus_view_direction(e, c);
         e->window_pending = 0;
         e->count = 0;
+        return;
+    }
+    if (c == 'q' && !e->operator_pending && e->mode == MODE_NORMAL) {
+        if (e->macro_recording) {
+            e->macro_recording = false;
+            e->last_macro_register = e->macro_record_register;
+            e->macro_record_register = 0;
+            editor_set_status(e, "Recorded");
+        } else {
+            e->waiting_char = 'q';
+            e->suppress_next_char = true;
+        }
+        return;
+    }
+    if (c == '@' && !e->operator_pending && e->mode == MODE_NORMAL) {
+        e->waiting_char = '@';
+        e->suppress_next_char = true;
+        return;
+    }
+    editor_macro_record_event(e, ev);
+    bool starts_change =
+        (e->mode == MODE_VISUAL && (c == 'd' || c == 'c' || c == 'x' || c == 'X' || c == '~' || c == 'r')) ||
+        c == 'i' || c == 'I' || c == 'a' || c == 'A' || c == 'o' || c == 'O' ||
+        c == 'x' || c == 'X' || c == 'C' || c == 'J' || c == 's' || c == 'S' ||
+        c == 'D' || c == 'p' || c == 'P' || c == 'r' || c == '~' || c == 'd' || c == 'c';
+    if (starts_change && !e->building_change && !e->replaying) editor_begin_recorded_change(e);
+    editor_record_change_event(e, ev);
+    if (c == '"') {
+        e->waiting_char = '"';
+        e->suppress_next_char = true;
         return;
     }
     if (!e->operator_pending && c >= '1' && c <= '9') {
@@ -1891,6 +2043,9 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     } else if (c == '\'' || c == '`') {
         e->waiting_char = c;
         e->suppress_next_char = true;
+    } else if ((c == 'I' || c == 'A') && e->mode == MODE_VISUAL && e->visual_block) {
+        editor_start_block_insert(e, c == 'A');
+        e->pending = 0;
     } else if (c == 'i' || c == 'I') {
         if (c == 'I') editor_go_to(e, first_nonblank_on_line(&e->text, e->cursor));
         e->mode = MODE_INSERT;
@@ -1934,10 +2089,12 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         }
         e->pending = 0;
     } else if (c == '.') {
+        editor_cancel_recorded_change(e);
         editor_repeat_change(e);
     } else if (c == '~') {
         editor_toggle_case(e, count);
         snprintf(e->last_change, sizeof(e->last_change), "~");
+        editor_commit_recorded_change(e);
         e->pending = 0;
     } else if (c == 'x') {
         if (e->mode == MODE_VISUAL && e->visual_block) editor_delete_visual_block(e);
@@ -1945,6 +2102,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         else editor_delete_chars(e, count);
         snprintf(e->last_change, sizeof(e->last_change), "x");
         e->pending_register = 0;
+        editor_commit_recorded_change(e);
         e->pending = 0;
     } else if (c == 'X') {
         if (e->mode == MODE_VISUAL && e->visual_block) editor_delete_visual_block(e);
@@ -1952,6 +2110,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         else editor_delete_left_chars(e, count);
         snprintf(e->last_change, sizeof(e->last_change), "X");
         e->pending_register = 0;
+        editor_commit_recorded_change(e);
         e->pending = 0;
     } else if (c == 'C') {
         size_t end = line_end_at(&e->text, e->cursor);
@@ -1963,6 +2122,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     } else if (c == 'J') {
         editor_join_lines(e, count);
         snprintf(e->last_change, sizeof(e->last_change), "J");
+        editor_commit_recorded_change(e);
         e->pending = 0;
     } else if (c == 's' || c == 'S') {
         if (c == 'S') {
@@ -1985,9 +2145,11 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         editor_reparse(e);
         snprintf(e->last_change, sizeof(e->last_change), "D");
         e->pending_register = 0;
+        editor_commit_recorded_change(e);
     } else if (c == 'Y') {
         editor_yank_line(e);
         e->pending_register = 0;
+        editor_cancel_recorded_change(e);
     } else if (c == 'd' || c == 'c' || c == 'y') {
         if (e->mode == MODE_VISUAL) {
             if (c == 'd') {
@@ -2022,6 +2184,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
                 e->mode = MODE_NORMAL;
                 e->visual_block = false;
                 e->pending_register = 0;
+                editor_commit_recorded_change(e);
             }
         } else {
             e->operator_pending = c;
@@ -2032,6 +2195,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         for (int i = 0; i < count; i++) editor_paste(e, c == 'P');
         snprintf(e->last_change, sizeof(e->last_change), "%c", c);
         e->pending_register = 0;
+        editor_commit_recorded_change(e);
         e->pending = 0;
     } else if (c == 'r') {
         e->waiting_char = 'r';
@@ -2121,10 +2285,30 @@ void editor_key(Editor *e, int key, int mods, int rows) {
 }
 
 void editor_handle_waiting_char(Editor *e, char ch) {
+    ReplayEvent ev = {.kind = REPLAY_WAITING_CHAR, .cp = (unsigned int)(unsigned char)ch};
+    editor_macro_record_event(e, ev);
+    editor_record_change_event(e, ev);
     if (e->waiting_char == 'r') {
         if (e->mode == MODE_VISUAL && e->visual_block) editor_replace_visual_block(e, ch);
         else editor_replace_char(e, ch);
         snprintf(e->last_change, sizeof(e->last_change), "r%c", ch);
+        editor_commit_recorded_change(e);
+    } else if (e->waiting_char == 'q') {
+        if (ch >= 'A' && ch <= 'Z') ch = (char)tolower((unsigned char)ch);
+        if (ch >= 'a' && ch <= 'z') {
+            e->macro_recording = true;
+            e->macro_record_register = ch;
+            e->macros[ch - 'a'].len = 0;
+            editor_set_status(e, "Recording");
+        }
+    } else if (e->waiting_char == '@') {
+        if (ch == '@') ch = e->last_macro_register;
+        if (ch >= 'A' && ch <= 'Z') ch = (char)tolower((unsigned char)ch);
+        if (ch >= 'a' && ch <= 'z' && e->macros[ch - 'a'].len > 0) {
+            e->last_macro_register = ch;
+            e->macro_replay_steps = 0;
+            editor_replay_events(e, e->macros[ch - 'a'].events, e->macros[ch - 'a'].len, 20);
+        }
     } else if (e->waiting_char == '"') {
         if (ch >= 'A' && ch <= 'Z') ch = (char)tolower((unsigned char)ch);
         if (ch >= 'a' && ch <= 'z') e->pending_register = ch;
@@ -2176,6 +2360,22 @@ void editor_handle_waiting_char(Editor *e, char ch) {
     e->operator_count = 0;
     e->count = 0;
 }
+
+static bool editor_execute_event(Editor *e, ReplayEvent ev, int rows) {
+    switch (ev.kind) {
+    case REPLAY_KEY:
+        editor_key(e, ev.key, ev.mods, rows);
+        return true;
+    case REPLAY_CHAR:
+        editor_insert_char(e, ev.cp);
+        return true;
+    case REPLAY_WAITING_CHAR:
+        editor_handle_waiting_char(e, (char)ev.cp);
+        return true;
+    }
+    return false;
+}
+
 static char *trim_command(char *s) {
     while (isspace((unsigned char)*s)) s++;
     char *end = s + strlen(s);
@@ -2271,41 +2471,66 @@ static bool split_substitute(char *cmd, char **pat, char **rep, bool *global) {
     return **pat != 0;
 }
 
-static bool editor_replace_literal_in_range(Editor *e, int line0, int line1, const char *pat, const char *rep, bool global) {
-    size_t pat_len = strlen(pat);
-    size_t rep_len = strlen(rep);
-    if (pat_len == 0) return false;
+static size_t expand_replacement(char *dst, size_t dst_size, const char *rep, const char *match, size_t match_len) {
+    size_t out = 0;
+    for (size_t i = 0; rep[i] && out + 1 < dst_size; i++) {
+        if (rep[i] == '&') {
+            size_t n = match_len;
+            if (n > dst_size - out - 1) n = dst_size - out - 1;
+            memcpy(dst + out, match, n);
+            out += n;
+        } else {
+            dst[out++] = rep[i];
+        }
+    }
+    dst[out] = 0;
+    return out;
+}
+
+static bool editor_replace_regex_in_range(Editor *e, int line0, int line1, const char *pat, const char *rep, bool global) {
+    regex_t rx;
+    if (regcomp(&rx, pat, REG_EXTENDED) != 0) return false;
     editor_begin_change(e);
     for (int line = line1; line >= line0; line--) {
         size_t start = line_start_by_number(&e->text, line);
         size_t end = line_end_at(&e->text, start);
-        for (size_t p = start; p + pat_len <= end;) {
-            if (memcmp(e->text.data + p, pat, pat_len) == 0) {
-                text_delete(&e->text, p, pat_len);
-                text_insert(&e->text, p, rep, rep_len);
-                end = end - pat_len + rep_len;
-                p += rep_len;
-                if (!global) break;
-            } else {
-                p++;
-            }
+        size_t p = start;
+        while (p <= end) {
+            size_t n = end - p;
+            char linebuf[4096];
+            if (n >= sizeof(linebuf)) n = sizeof(linebuf) - 1;
+            memcpy(linebuf, e->text.data + p, n);
+            linebuf[n] = 0;
+            regmatch_t m;
+            if (regexec(&rx, linebuf, 1, &m, 0) != 0 || m.rm_so < 0) break;
+            size_t a = p + (size_t)m.rm_so;
+            size_t b = p + (size_t)m.rm_eo;
+            char repl[4096];
+            size_t repl_len = expand_replacement(repl, sizeof(repl), rep, e->text.data + a, b - a);
+            text_delete(&e->text, a, b - a);
+            text_insert(&e->text, a, repl, repl_len);
+            end = end - (b - a) + repl_len;
+            p = a + repl_len;
+            if (b == a) p++;
+            if (!global) break;
         }
     }
+    regfree(&rx);
     e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
     e->desired_col = byte_col(&e->text, e->cursor);
     editor_reparse(e);
     return true;
 }
 
-static bool line_contains_literal(const Text *t, int line, const char *pat) {
-    size_t n = strlen(pat);
-    if (n == 0) return false;
+static bool line_matches_regex(const Text *t, int line, regex_t *rx) {
     size_t start = line_start_by_number(t, line);
     size_t end = line_end_at(t, start);
-    for (size_t p = start; p + n <= end; p++) {
-        if (memcmp(t->data + p, pat, n) == 0) return true;
-    }
-    return false;
+    size_t n = end - start;
+    char linebuf[4096];
+    if (n >= sizeof(linebuf)) n = sizeof(linebuf) - 1;
+    memcpy(linebuf, t->data + start, n);
+    linebuf[n] = 0;
+    return regexec(rx, linebuf, 0, NULL, 0) == 0;
 }
 
 static bool editor_global_delete(Editor *e, const char *cmd, bool invert) {
@@ -2319,9 +2544,11 @@ static bool editor_global_delete(Editor *e, const char *cmd, bool invert) {
     if (pat_len >= sizeof(needle)) pat_len = sizeof(needle) - 1;
     memcpy(needle, pat, pat_len);
     needle[pat_len] = 0;
+    regex_t rx;
+    if (regcomp(&rx, needle, REG_EXTENDED) != 0) return false;
     editor_begin_change(e);
     for (int line = line_count(&e->text) - 1; line >= 0; line--) {
-        bool hit = line_contains_literal(&e->text, line, needle);
+        bool hit = line_matches_regex(&e->text, line, &rx);
         if (invert ? !hit : hit) {
             size_t start = line_start_by_number(&e->text, line);
             size_t end = line_end_at(&e->text, start);
@@ -2329,6 +2556,7 @@ static bool editor_global_delete(Editor *e, const char *cmd, bool invert) {
             text_delete(&e->text, start, end - start);
         }
     }
+    regfree(&rx);
     e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
     e->desired_col = byte_col(&e->text, e->cursor);
     editor_reparse(e);
@@ -2352,7 +2580,7 @@ void app_execute_command(App *app) {
     } else if (has_range && ex_tail[0] == 's') {
         char *pat = NULL, *rep = NULL;
         bool global = false;
-        if (split_substitute(ex_tail, &pat, &rep, &global)) editor_replace_literal_in_range(e, ex_line0, ex_line1, pat, rep, global);
+        if (split_substitute(ex_tail, &pat, &rep, &global)) editor_replace_regex_in_range(e, ex_line0, ex_line1, pat, rep, global);
         else editor_set_status(e, "Substitute failed");
     } else if ((cmd[0] == 'g' && editor_global_delete(e, cmd, false)) || (cmd[0] == 'v' && editor_global_delete(e, cmd, true))) {
     } else if (cmd[0] == '/' || cmd[0] == '?') {

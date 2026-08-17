@@ -18,12 +18,14 @@ add_executable(med
   src/common.c
   src/editor.c
   src/vulkan_app.c
+  third_party/cjson/cJSON.c
 )
 
 target_include_directories(med PRIVATE
   ${GLFW_INCLUDE_DIRS}
   ${FREETYPE_INCLUDE_DIRS}
   ${TREE_SITTER_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
 )
 
 target_compile_options(med PRIVATE
@@ -91,12 +93,14 @@ add_executable(med_editor_tests
   src/editor_tests.c
   src/common.c
   src/editor.c
+  third_party/cjson/cJSON.c
 )
 
 target_include_directories(med_editor_tests PRIVATE
   ${GLFW_INCLUDE_DIRS}
   ${FREETYPE_INCLUDE_DIRS}
   ${TREE_SITTER_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
 )
 
 target_compile_options(med_editor_tests PRIVATE

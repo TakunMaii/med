@@ -45,17 +45,19 @@ ctest --test-dir build --output-on-failure
 - `Esc`: return to normal mode; insert-mode edits are grouped into a single undo step
 - Visual: `v` for character selection, `V` for line selection, `Ctrl-v` for block selection, `o` to swap selection endpoints, `gv` to restore the previous selection
 - Visual block: `r{char}` replaces the selected block
+- Visual block insert: `I` inserts text on each selected line, `A` appends text on each selected line
 - Operators: `d`, `c`, `y` with motions, including `dd`, `cc`, `yy`, `dw`, `cw`, `d$`, `c0`
 - Text objects: `iw`, `aw`, `iW`, `aW`, `ip`, `ap`, plus delimiter objects such as `i(`, `a(`, `i"`, `a"`
-- Edit: `x`, `s`, `S`, `D`, `r`, `~`, `.`, `u`, `Ctrl-r`; `.` repeats simple edits and the last inserted text
+- Edit: `x`, `s`, `S`, `D`, `r`, `~`, `.`, `u`, `Ctrl-r`; `.` replays the last recorded change event stream
 - Paste: `p`, `P`
 - Registers: named register prefixes such as `"ayy`, `"ap`
+- Macros: `q{reg}` records, `@{reg}` replays, `@@` repeats the last macro
 - Marks: `ma`, `'a`, and `` `a`` for lowercase file-local marks
 - Search: `/pattern`, `?pattern`, `n`, `N`
 - Command line: defaults to one line, wraps/expands up to eight lines for long input or output; `Shift-Enter` or `Ctrl-Enter` inserts a command-line newline
 - `:w`, `:w filename`, `:q`, `:q!`, `:wq`: write and quit commands
 - Ex ranges: `:1,3d`, `:%d`, `:1,3y`, `:%y`
-- Substitute/global: `:s/foo/bar/`, `:%s/foo/bar/g`, `:g/pat/d`, `:v/pat/d` use literal matching
+- Substitute/global: `:s/pat/repl/`, `:%s/pat/repl/g`, `:g/pat/d`, `:v/pat/d` use POSIX extended regular expressions; `&` in replacements expands to the whole match
 - `:e path`: open a file in a new buffer
 - `:bnew`, `:bn`, `:bp`, `:bfirst`, `:blast`, `:buffer N`, `:ls`, `:bd`, `:bd!`: buffer commands; `:ls` uses multiline output
 - Windows/tabs: `Ctrl-w s`, `Ctrl-w v`, `Ctrl-w w`, `Ctrl-w q`, `Ctrl-w c`, `Ctrl-w o`, `Ctrl-w h/j/k/l`, `gt`, `gT`
