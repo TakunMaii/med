@@ -269,6 +269,12 @@ static VkSurfaceFormatKHR choose_format(VkSurfaceFormatKHR *formats, uint32_t co
 }
 
 static void create_swapchain(VkApp *app) {
+    int fbw = 0, fbh = 0;
+    glfwGetFramebufferSize(app->window, &fbw, &fbh);
+    while (fbw == 0 || fbh == 0) {
+        glfwWaitEvents();
+        glfwGetFramebufferSize(app->window, &fbw, &fbh);
+    }
     VkSurfaceCapabilitiesKHR caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(app->physical, app->surface, &caps);
     uint32_t fcount = 0;
@@ -281,10 +287,12 @@ static void create_swapchain(VkApp *app) {
     if (caps.currentExtent.width != UINT32_MAX) {
         app->extent = caps.currentExtent;
     } else {
-        int w, h;
-        glfwGetFramebufferSize(app->window, &w, &h);
-        app->extent.width = (uint32_t)w;
-        app->extent.height = (uint32_t)h;
+        app->extent.width = (uint32_t)fbw;
+        app->extent.height = (uint32_t)fbh;
+        if (app->extent.width < caps.minImageExtent.width) app->extent.width = caps.minImageExtent.width;
+        if (app->extent.width > caps.maxImageExtent.width) app->extent.width = caps.maxImageExtent.width;
+        if (app->extent.height < caps.minImageExtent.height) app->extent.height = caps.minImageExtent.height;
+        if (app->extent.height > caps.maxImageExtent.height) app->extent.height = caps.maxImageExtent.height;
     }
     uint32_t image_count = caps.minImageCount + 1;
     if (caps.maxImageCount && image_count > caps.maxImageCount) image_count = caps.maxImageCount;
@@ -352,9 +360,11 @@ static void create_render_pass(VkApp *app) {
 }
 
 static void create_pipeline(VkApp *app) {
-    VkDescriptorSetLayoutBinding b = {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
-    VkDescriptorSetLayoutCreateInfo dl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
-    vkCreateDescriptorSetLayout(app->device, &dl, NULL, &app->desc_layout);
+    if (!app->desc_layout) {
+        VkDescriptorSetLayoutBinding b = {.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
+        VkDescriptorSetLayoutCreateInfo dl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
+        vkCreateDescriptorSetLayout(app->device, &dl, NULL, &app->desc_layout);
+    }
     VkPushConstantRange pc = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .offset = 0, .size = sizeof(float) * 2};
     VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &app->desc_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
     vkCreatePipelineLayout(app->device, &pl, NULL, &app->pipeline_layout);
@@ -421,6 +431,12 @@ static void create_framebuffers(VkApp *app) {
     }
 }
 
+static void allocate_command_buffers(VkApp *app) {
+    app->cmds = xmalloc(sizeof(*app->cmds) * app->image_count);
+    VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = app->cmd_pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = app->image_count};
+    vkAllocateCommandBuffers(app->device, &ai, app->cmds);
+}
+
 static void create_descriptors(VkApp *app) {
     VkDescriptorPoolSize size = {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1};
     VkDescriptorPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &size};
@@ -435,9 +451,7 @@ static void create_descriptors(VkApp *app) {
 static void create_commands_sync(VkApp *app) {
     VkCommandPoolCreateInfo cp = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = app->graphics_family, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT};
     vkCreateCommandPool(app->device, &cp, NULL, &app->cmd_pool);
-    app->cmds = xmalloc(sizeof(*app->cmds) * app->image_count);
-    VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = app->cmd_pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = app->image_count};
-    vkAllocateCommandBuffers(app->device, &ai, app->cmds);
+    allocate_command_buffers(app);
     for (int i = 0; i < MAX_FRAMES; i++) {
         create_buffer(app, sizeof(Vertex) * MAX_VERTICES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &app->vertex_buffers[i]);
         VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -446,6 +460,59 @@ static void create_commands_sync(VkApp *app) {
         vkCreateSemaphore(app->device, &si, NULL, &app->render_finished[i]);
         vkCreateFence(app->device, &fi, NULL, &app->in_flight[i]);
     }
+}
+
+static void cleanup_swapchain(VkApp *app) {
+    if (app->cmds) {
+        vkFreeCommandBuffers(app->device, app->cmd_pool, app->image_count, app->cmds);
+        free(app->cmds);
+        app->cmds = NULL;
+    }
+    if (app->images) {
+        for (uint32_t i = 0; i < app->image_count; i++) {
+            if (app->images[i].framebuffer) vkDestroyFramebuffer(app->device, app->images[i].framebuffer, NULL);
+            if (app->images[i].view) vkDestroyImageView(app->device, app->images[i].view, NULL);
+        }
+        free(app->images);
+        app->images = NULL;
+    }
+    if (app->pipeline) {
+        vkDestroyPipeline(app->device, app->pipeline, NULL);
+        app->pipeline = VK_NULL_HANDLE;
+    }
+    if (app->pipeline_layout) {
+        vkDestroyPipelineLayout(app->device, app->pipeline_layout, NULL);
+        app->pipeline_layout = VK_NULL_HANDLE;
+    }
+    if (app->cursor_pipeline) {
+        vkDestroyPipeline(app->device, app->cursor_pipeline, NULL);
+        app->cursor_pipeline = VK_NULL_HANDLE;
+    }
+    if (app->cursor_pipeline_layout) {
+        vkDestroyPipelineLayout(app->device, app->cursor_pipeline_layout, NULL);
+        app->cursor_pipeline_layout = VK_NULL_HANDLE;
+    }
+    if (app->render_pass) {
+        vkDestroyRenderPass(app->device, app->render_pass, NULL);
+        app->render_pass = VK_NULL_HANDLE;
+    }
+    if (app->swapchain) {
+        vkDestroySwapchainKHR(app->device, app->swapchain, NULL);
+        app->swapchain = VK_NULL_HANDLE;
+    }
+    app->image_count = 0;
+}
+
+static void recreate_swapchain(VkApp *app) {
+    vkDeviceWaitIdle(app->device);
+    cleanup_swapchain(app);
+    create_swapchain(app);
+    create_render_pass(app);
+    create_pipeline(app);
+    create_cursor_pipeline(app);
+    create_framebuffers(app);
+    allocate_command_buffers(app);
+    app->framebuffer_resized = false;
 }
 
 static void framebuffer_cb(GLFWwindow *window, int w, int h) {
@@ -881,9 +948,17 @@ static void record_cmd(App *owner, uint32_t image, uint32_t vcount) {
 void draw_frame(App *owner) {
     VkApp *app = &owner->vk;
     vkWaitForFences(app->device, 1, &app->in_flight[app->frame], VK_TRUE, UINT64_MAX);
+    if (app->framebuffer_resized) {
+        recreate_swapchain(app);
+        return;
+    }
     uint32_t image = 0;
     VkResult res = vkAcquireNextImageKHR(app->device, app->swapchain, UINT64_MAX, app->image_available[app->frame], VK_NULL_HANDLE, &image);
-    if (res != VK_SUCCESS) return;
+    if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swapchain(app);
+        return;
+    }
+    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) return;
     vkResetFences(app->device, 1, &app->in_flight[app->frame]);
     DrawList dl = {.vertices = xmalloc(sizeof(Vertex) * MAX_VERTICES), .cap = MAX_VERTICES};
     build_draw_list(owner, &dl);
@@ -906,6 +981,11 @@ void draw_frame(App *owner) {
     };
     if (vkQueueSubmit(app->graphics_queue, 1, &submit, app->in_flight[app->frame]) != VK_SUCCESS) die("vkQueueSubmit failed");
     VkPresentInfoKHR present = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1, .pWaitSemaphores = &app->render_finished[app->frame], .swapchainCount = 1, .pSwapchains = &app->swapchain, .pImageIndices = &image};
-    vkQueuePresentKHR(app->present_queue, &present);
+    res = vkQueuePresentKHR(app->present_queue, &present);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || app->framebuffer_resized) {
+        recreate_swapchain(app);
+    } else if (res != VK_SUCCESS) {
+        die("vkQueuePresentKHR failed");
+    }
     app->frame = (app->frame + 1) % MAX_FRAMES;
 }
