@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -28,6 +29,7 @@ void lsp_init(LspClient *lsp) {
 void lsp_shutdown(LspClient *lsp) {
     if (lsp->in_fd >= 0) close(lsp->in_fd);
     if (lsp->out_fd >= 0) close(lsp->out_fd);
+    if (lsp->trace) fclose(lsp->trace);
     if (lsp->pid > 0) {
         kill(lsp->pid, SIGTERM);
         waitpid(lsp->pid, NULL, WNOHANG);
@@ -84,6 +86,36 @@ static void file_uri(const char *path, char *out, size_t out_size) {
     snprintf(out, out_size, "file://%s", resolved);
 }
 
+static void lsp_trace_open(LspClient *lsp) {
+    const char *path = getenv("MED_LSP_TRACE");
+    if (!path || !path[0] || lsp->trace) return;
+    lsp->trace = fopen(path, "a");
+    if (!lsp->trace) return;
+    setvbuf(lsp->trace, NULL, _IOLBF, 0);
+    fprintf(lsp->trace, "\n=== med lsp trace start ===\n");
+    fflush(lsp->trace);
+}
+
+static void lsp_trace_json(Editor *e, const char *direction, cJSON *msg) {
+    if (!e->lsp.trace) return;
+    char *body = cJSON_PrintUnformatted(msg);
+    if (!body) return;
+    fprintf(e->lsp.trace, "%s %s\n", direction, body);
+    fflush(e->lsp.trace);
+    cJSON_free(body);
+}
+
+static void lsp_trace_line(Editor *e, const char *tag, const char *fmt, ...) {
+    if (!e->lsp.trace) return;
+    fprintf(e->lsp.trace, "%s ", tag);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(e->lsp.trace, fmt, args);
+    va_end(args);
+    fputc('\n', e->lsp.trace);
+    fflush(e->lsp.trace);
+}
+
 static bool lsp_write_json(LspClient *lsp, cJSON *msg) {
     char *body = cJSON_PrintUnformatted(msg);
     if (!body) return false;
@@ -109,6 +141,25 @@ static cJSON *text_document_obj(Editor *e) {
     return td;
 }
 
+static void escaped_current_line(Editor *e, char *out, size_t out_size) {
+    if (out_size == 0) return;
+    size_t start = line_start_at(&e->text, e->cursor);
+    size_t end = line_end_at(&e->text, start);
+    size_t n = 0;
+    for (size_t i = start; i < end && n + 2 < out_size; i++) {
+        char ch = e->text.data[i];
+        if (ch == '\t') {
+            out[n++] = '\\';
+            out[n++] = 't';
+        } else if ((unsigned char)ch < 32) {
+            out[n++] = '?';
+        } else {
+            out[n++] = ch;
+        }
+    }
+    out[n] = 0;
+}
+
 static int lsp_send_request(Editor *e, const char *method, cJSON *params) {
     LspClient *lsp = &e->lsp;
     int id = lsp->next_id++;
@@ -117,6 +168,7 @@ static int lsp_send_request(Editor *e, const char *method, cJSON *params) {
     cJSON_AddNumberToObject(msg, "id", id);
     cJSON_AddStringToObject(msg, "method", method);
     if (params) cJSON_AddItemToObject(msg, "params", params);
+    lsp_trace_json(e, "send", msg);
     lsp_write_json(lsp, msg);
     cJSON_Delete(msg);
     return id;
@@ -127,6 +179,7 @@ static void lsp_send_notification(Editor *e, const char *method, cJSON *params) 
     cJSON_AddStringToObject(msg, "jsonrpc", "2.0");
     cJSON_AddStringToObject(msg, "method", method);
     if (params) cJSON_AddItemToObject(msg, "params", params);
+    lsp_trace_json(e, "send", msg);
     lsp_write_json(&e->lsp, msg);
     cJSON_Delete(msg);
 }
@@ -142,6 +195,11 @@ static bool spawn_server(Editor *e, const LspServerConfig *cfg) {
         close(to_child[1]);
         close(from_child[0]);
         close(from_child[1]);
+        int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            dup2(null_fd, STDERR_FILENO);
+            close(null_fd);
+        }
         execlp(cfg->cmd, cfg->cmd, NULL);
         _exit(127);
     }
@@ -162,6 +220,11 @@ static void lsp_initialize(Editor *e) {
     cJSON_AddNumberToObject(params, "processId", (double)getpid());
     cJSON_AddStringToObject(params, "rootUri", e->lsp.root);
     cJSON *caps = cJSON_CreateObject();
+    cJSON *text_doc = cJSON_CreateObject();
+    cJSON *completion = cJSON_CreateObject();
+    cJSON_AddBoolToObject(completion, "contextSupport", true);
+    cJSON_AddItemToObject(text_doc, "completion", completion);
+    cJSON_AddItemToObject(caps, "textDocument", text_doc);
     cJSON_AddItemToObject(params, "capabilities", caps);
     lsp_send_request(e, "initialize", params);
 }
@@ -183,11 +246,22 @@ void lsp_maybe_start(Editor *e) {
     const LspServerConfig *cfg = server_for_path(e->path);
     if (!cfg) return;
     lsp_init(&e->lsp);
-    char root_path[512];
+    lsp_trace_open(&e->lsp);
+    char root_path[900];
     find_root(e->path, root_path, sizeof(root_path));
+    char resolved_root[1024];
+    if (realpath(root_path, resolved_root)) {
+        strncpy(root_path, resolved_root, sizeof(root_path) - 1);
+        root_path[sizeof(root_path) - 1] = 0;
+    }
     snprintf(e->lsp.root, sizeof(e->lsp.root), "file://%s", root_path);
     file_uri(e->path, e->lsp.uri, sizeof(e->lsp.uri));
-    if (!spawn_server(e, cfg)) return;
+    lsp_trace_line(e, "start", "server=%s path=%s root=%s uri=%s", cfg->name, e->path, e->lsp.root, e->lsp.uri);
+    if (!spawn_server(e, cfg)) {
+        lsp_trace_line(e, "error", "failed to spawn %s", cfg->cmd);
+        lsp_shutdown(&e->lsp);
+        return;
+    }
     lsp_initialize(e);
 }
 
@@ -222,14 +296,36 @@ void lsp_request_hover(Editor *e) {
 
 void lsp_request_completion(Editor *e) {
     if (!e->lsp.running || !e->lsp.opened) return;
+    char line_text[512];
+    escaped_current_line(e, line_text, sizeof(line_text));
+    lsp_trace_line(e, "completion-request",
+                   "cursor=%zu line=%d character=%d version=%d needs_sync=%d triggerKind=%d trigger=%s lineText=\"%s\"",
+                   e->cursor, byte_line(&e->text, e->cursor), byte_col(&e->text, e->cursor),
+                   e->lsp.version, e->lsp.needs_sync ? 1 : 0,
+                   e->lsp.completion_trigger_kind ? e->lsp.completion_trigger_kind : 1,
+                   e->lsp.completion_trigger[0] ? e->lsp.completion_trigger : "", line_text);
+    e->lsp.completion_pending = false;
     e->lsp.completion_visible = false;
     e->lsp.completion_count = 0;
     e->lsp.completion_selected = 0;
     e->lsp.completion_scroll = 0;
+    memset(e->lsp.completion_insert_texts, 0, sizeof(e->lsp.completion_insert_texts));
     cJSON *params = cJSON_CreateObject();
     cJSON_AddItemToObject(params, "textDocument", text_document_obj(e));
     cJSON_AddItemToObject(params, "position", position_obj(e));
+    cJSON *context = cJSON_CreateObject();
+    cJSON_AddNumberToObject(context, "triggerKind", e->lsp.completion_trigger_kind ? e->lsp.completion_trigger_kind : 1);
+    if (e->lsp.completion_trigger[0]) cJSON_AddStringToObject(context, "triggerCharacter", e->lsp.completion_trigger);
+    cJSON_AddItemToObject(params, "context", context);
     e->lsp.completion_id = lsp_send_request(e, "textDocument/completion", params);
+    e->lsp.completion_trigger_kind = 0;
+    e->lsp.completion_trigger[0] = 0;
+}
+
+void lsp_request_pending_completion(Editor *e) {
+    if (!e->lsp.completion_pending) return;
+    if (!e->lsp.running || !e->lsp.initialized || !e->lsp.opened || e->lsp.needs_sync) return;
+    lsp_request_completion(e);
 }
 
 void lsp_request_definition(Editor *e, bool declaration) {
@@ -274,19 +370,38 @@ static const char *completion_label(cJSON *item) {
     return cJSON_IsString(label) ? label->valuestring : NULL;
 }
 
+static const char *completion_insert_text(cJSON *item, const char *label) {
+    cJSON *text_edit = cJSON_GetObjectItem(item, "textEdit");
+    if (cJSON_IsObject(text_edit)) {
+        cJSON *new_text = cJSON_GetObjectItem(text_edit, "newText");
+        if (cJSON_IsString(new_text)) return new_text->valuestring;
+    }
+    cJSON *insert_text = cJSON_GetObjectItem(item, "insertText");
+    if (cJSON_IsString(insert_text)) return insert_text->valuestring;
+    return label;
+}
+
 static void parse_completion(Editor *e, cJSON *result) {
     cJSON *items = cJSON_IsArray(result) ? result : cJSON_GetObjectItem(result, "items");
     if (!cJSON_IsArray(items)) return;
     e->lsp.completion_count = 0;
+    int total = cJSON_GetArraySize(items);
+    lsp_trace_line(e, "completion-response", "items=%d", total);
     cJSON *item = NULL;
     cJSON_ArrayForEach(item, items) {
         if (e->lsp.completion_count >= 32) break;
         const char *label = completion_label(item);
         if (!label) continue;
+        const char *insert = completion_insert_text(item, label);
         size_t i = e->lsp.completion_count++;
         snprintf(e->lsp.completions[i], sizeof(e->lsp.completions[i]), "%s", label);
+        snprintf(e->lsp.completion_insert_texts[i], sizeof(e->lsp.completion_insert_texts[i]), "%s", insert ? insert : label);
         cJSON *detail = cJSON_GetObjectItem(item, "detail");
         snprintf(e->lsp.completion_details[i], sizeof(e->lsp.completion_details[i]), "%s", cJSON_IsString(detail) ? detail->valuestring : "");
+        if (i < 10) {
+            lsp_trace_line(e, "completion-item", "%zu label=\"%s\" insert=\"%s\" detail=\"%s\"",
+                           i, e->lsp.completions[i], e->lsp.completion_insert_texts[i], e->lsp.completion_details[i]);
+        }
     }
     e->lsp.completion_selected = 0;
     e->lsp.completion_scroll = 0;
@@ -380,6 +495,7 @@ static bool parse_one_message(Editor *e) {
     cJSON *msg = cJSON_Parse(e->lsp.read_buf + header_len);
     e->lsp.read_buf[header_len + len] = saved;
     if (msg) {
+        lsp_trace_json(e, "recv", msg);
         handle_response(e, msg);
         cJSON_Delete(msg);
     }
@@ -407,7 +523,9 @@ void lsp_poll(Editor *e) {
 
 bool lsp_completion_accept(Editor *e) {
     if (!e->lsp.completion_visible || e->lsp.completion_selected >= e->lsp.completion_count) return false;
-    const char *s = e->lsp.completions[e->lsp.completion_selected];
+    const char *s = e->lsp.completion_insert_texts[e->lsp.completion_selected][0]
+        ? e->lsp.completion_insert_texts[e->lsp.completion_selected]
+        : e->lsp.completions[e->lsp.completion_selected];
     size_t start = e->cursor;
     while (start > 0) {
         char ch = e->text.data[start - 1];
@@ -433,6 +551,7 @@ bool lsp_completion_accept(Editor *e) {
     e->suppress_completion_request = false;
     e->lsp.completion_visible = false;
     e->lsp.completion_count = 0;
+    e->lsp.completion_pending = false;
     return true;
 }
 

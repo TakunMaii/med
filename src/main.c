@@ -14,6 +14,7 @@ int main(int argc, char **argv) {
         glfwPollEvents();
         lsp_maybe_start(&app.editor);
         lsp_sync_if_needed(&app.editor);
+        lsp_request_pending_completion(&app.editor);
         lsp_poll(&app.editor);
         draw_frame(&app);
     }

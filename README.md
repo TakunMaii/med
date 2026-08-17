@@ -70,3 +70,5 @@ ctest --test-dir build --output-on-failure
 ## LSP
 
 `med` starts `clangd` automatically for C/C++ files and communicates through LSP JSON-RPC over stdio. File changes are synchronized with full-document `didChange` messages. Diagnostics currently surface ERROR-level messages, matching the local Neovim configuration.
+
+Set `MED_LSP_TRACE=/tmp/med-lsp.log` before launching `med` to append an LSP trace. The trace records outgoing and incoming JSON-RPC messages, plus completion request summaries with the active URI, cursor position, document version, trigger context, current line text, and the first displayed completion items.

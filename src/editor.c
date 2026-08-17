@@ -485,11 +485,15 @@ static void editor_set_status(Editor *e, const char *msg) {
     snprintf(e->status, sizeof(e->status), "%s", msg ? msg : "");
 }
 
+static void editor_mark_text_changed(Editor *e) {
+    e->dirty = true;
+    e->lsp.needs_sync = true;
+}
+
 static void editor_begin_change(Editor *e) {
     snapshot_stack_push(&e->undo, &e->text, e->cursor);
     snapshot_stack_clear(&e->redo);
-    e->dirty = true;
-    e->lsp.needs_sync = true;
+    editor_mark_text_changed(e);
 }
 
 static void editor_begin_insert_change(Editor *e) {
@@ -1105,6 +1109,7 @@ void editor_jump_back(Editor *e) {
     e->desired_col = byte_col(&e->text, e->cursor);
     e->lsp.hover_visible = false;
     e->lsp.completion_visible = false;
+    e->lsp.completion_pending = false;
 }
 
 static void editor_yank_range(Editor *e, size_t start, size_t end);
@@ -1118,12 +1123,21 @@ void editor_insert_char(Editor *e, unsigned int cp) {
     editor_begin_insert_change(e);
     char c = (char)cp;
     text_insert(&e->text, e->cursor, &c, 1);
+    editor_mark_text_changed(e);
     editor_record_insert_text(e, &c, 1);
     e->cursor++;
     e->desired_col = byte_col(&e->text, e->cursor);
     editor_reparse(e);
     if (!e->suppress_completion_request && (isalnum((unsigned char)c) || c == '_' || c == '.' || c == '>')) {
-        lsp_request_completion(e);
+        e->lsp.completion_visible = false;
+        e->lsp.completion_count = 0;
+        e->lsp.completion_selected = 0;
+        e->lsp.completion_scroll = 0;
+        memset(e->lsp.completion_insert_texts, 0, sizeof(e->lsp.completion_insert_texts));
+        e->lsp.completion_pending = true;
+        e->lsp.completion_trigger_kind = (c == '.' || c == '>') ? 2 : 1;
+        e->lsp.completion_trigger[0] = (c == '.' || c == '>') ? c : 0;
+        e->lsp.completion_trigger[1] = 0;
     }
 }
 
@@ -1131,6 +1145,7 @@ static void editor_backspace(Editor *e) {
     if (e->cursor == 0) return;
     editor_begin_insert_change(e);
     text_delete(&e->text, e->cursor - 1, 1);
+    editor_mark_text_changed(e);
     e->cursor--;
     e->desired_col = byte_col(&e->text, e->cursor);
     editor_reparse(e);
@@ -1173,6 +1188,7 @@ static void editor_newline(Editor *e) {
     if (e->mode == MODE_INSERT) editor_begin_insert_change(e);
     else editor_begin_change(e);
     text_insert(&e->text, e->cursor, "\n", 1);
+    editor_mark_text_changed(e);
     if (e->mode == MODE_INSERT) editor_record_insert_text(e, "\n", 1);
     e->cursor++;
     e->desired_col = 0;
@@ -1191,6 +1207,7 @@ static void editor_insert_bytes_for_insert(Editor *e, const char *s, size_t n) {
     if (n == 0) return;
     editor_begin_insert_change(e);
     text_insert(&e->text, e->cursor, s, n);
+    editor_mark_text_changed(e);
     editor_record_insert_text(e, s, n);
     e->cursor += n;
     e->desired_col = byte_col(&e->text, e->cursor);
@@ -1979,6 +1996,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     if (key == GLFW_KEY_ESCAPE) {
         e->lsp.hover_visible = false;
         e->lsp.completion_visible = false;
+        e->lsp.completion_pending = false;
         editor_macro_record_event(e, ev);
         editor_record_change_event(e, ev);
         if (e->mode == MODE_INSERT && e->block_insert_active) editor_finish_block_insert(e);
@@ -2004,6 +2022,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     if ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_O) {
         e->lsp.hover_visible = false;
         e->lsp.completion_visible = false;
+        e->lsp.completion_pending = false;
         editor_jump_back(e);
         return;
     }

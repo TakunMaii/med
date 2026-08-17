@@ -581,6 +581,68 @@ static void test_lsp_completion_request_clears_stale_items(void) {
     close(e.lsp.in_fd);
 }
 
+static void test_insert_completion_queues_after_buffer_change(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "pri\n", 3);
+    e.mode = MODE_INSERT;
+    e.lsp.completion_visible = true;
+    e.lsp.completion_count = 2;
+    e.lsp.completion_selected = 1;
+    e.lsp.completion_scroll = 1;
+
+    editor_insert_char(&e, 'n');
+    assert(strcmp(e.text.data, "prin\n") == 0);
+    assert(e.lsp.needs_sync);
+    assert(e.lsp.completion_pending);
+    assert(!e.lsp.completion_visible);
+    assert(e.lsp.completion_count == 0);
+    assert(e.lsp.completion_selected == 0);
+    assert(e.lsp.completion_scroll == 0);
+    assert(e.lsp.completion_trigger_kind == 1);
+    assert(e.lsp.completion_trigger[0] == 0);
+    assert(e.lsp.completion_id == 0);
+
+    e.lsp.needs_sync = false;
+    e.lsp.completion_pending = false;
+    editor_insert_char(&e, 't');
+    assert(strcmp(e.text.data, "print\n") == 0);
+    assert(e.lsp.needs_sync);
+    assert(e.lsp.completion_pending);
+
+    editor_insert_char(&e, '.');
+    assert(e.lsp.completion_pending);
+    assert(e.lsp.completion_trigger_kind == 2);
+    assert(strcmp(e.lsp.completion_trigger, ".") == 0);
+}
+
+static void test_pending_completion_waits_for_synced_buffer(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "prin\n", 4);
+    e.lsp.running = true;
+    e.lsp.initialized = true;
+    e.lsp.opened = true;
+    e.lsp.needs_sync = true;
+    e.lsp.completion_pending = true;
+    e.lsp.in_fd = open("/dev/null", O_WRONLY);
+    assert(e.lsp.in_fd >= 0);
+
+    lsp_request_pending_completion(&e);
+    assert(e.lsp.completion_pending);
+    assert(e.lsp.completion_id == 0);
+
+    e.lsp.needs_sync = false;
+    e.lsp.completion_trigger_kind = 2;
+    snprintf(e.lsp.completion_trigger, sizeof(e.lsp.completion_trigger), ".");
+    lsp_request_pending_completion(&e);
+    assert(!e.lsp.completion_pending);
+    assert(e.lsp.completion_id != 0);
+    assert(e.lsp.completion_trigger_kind == 0);
+    assert(e.lsp.completion_trigger[0] == 0);
+    close(e.lsp.in_fd);
+}
+
 static void test_lsp_completion_accept_replaces_typed_prefix(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -601,6 +663,23 @@ static void test_lsp_completion_accept_replaces_typed_prefix(void) {
     assert(e.lsp.completion_count == 0);
     assert(e.lsp.completion_id == 0);
     close(e.lsp.in_fd);
+}
+
+static void test_lsp_completion_accept_uses_insert_text_not_label(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "mem\n", 3);
+    e.mode = MODE_INSERT;
+    e.lsp.completion_visible = true;
+    e.lsp.completion_count = 1;
+    e.lsp.completion_selected = 0;
+    snprintf(e.lsp.completions[0], sizeof(e.lsp.completions[0]), " memset(void *s, int c, size_t n)");
+    snprintf(e.lsp.completion_insert_texts[0], sizeof(e.lsp.completion_insert_texts[0]), "memset");
+
+    assert(lsp_completion_accept(&e));
+    assert(strcmp(e.text.data, "memset\n") == 0);
+    assert(!e.lsp.completion_visible);
+    assert(e.lsp.completion_count == 0);
 }
 
 static void test_insert_tab_aligns_to_shiftwidth(void) {
@@ -762,7 +841,10 @@ int main(void) {
     test_lsp_completion_selection_scrolls_visible_window();
     test_lsp_popups_close_on_escape_and_cursor_move();
     test_lsp_completion_request_clears_stale_items();
+    test_insert_completion_queues_after_buffer_change();
+    test_pending_completion_waits_for_synced_buffer();
     test_lsp_completion_accept_replaces_typed_prefix();
+    test_lsp_completion_accept_uses_insert_text_not_label();
     test_insert_tab_aligns_to_shiftwidth();
     test_insert_enter_autoindents();
     test_o_and_O_autoindent();
