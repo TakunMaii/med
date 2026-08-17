@@ -489,6 +489,7 @@ static void editor_begin_change(Editor *e) {
     snapshot_stack_push(&e->undo, &e->text, e->cursor);
     snapshot_stack_clear(&e->redo);
     e->dirty = true;
+    e->lsp.needs_sync = true;
 }
 
 static void editor_begin_insert_change(Editor *e) {
@@ -728,6 +729,7 @@ bool editor_open_buffer(Editor *e, const char *path) {
     if (!editor_open_buffer_index(e, path, &index)) return false;
     editor_load_buffer(e, index);
     editor_reparse(e);
+    lsp_maybe_start(e);
     editor_store_current_buffer(e);
     return true;
 }
@@ -790,6 +792,7 @@ void editor_init(Editor *e, const char *path) {
     memset(e, 0, sizeof(*e));
     text_init(&e->text);
     text_init(&e->yank);
+    lsp_init(&e->lsp);
     for (int i = 0; i < 26; i++) text_init(&e->registers[i]);
     e->mode = MODE_NORMAL;
     e->desired_col = -1;
@@ -816,6 +819,7 @@ void editor_init(Editor *e, const char *path) {
     }
     editor_init_treesitter(e);
     editor_reparse(e);
+    lsp_maybe_start(e);
     e->buffers = calloc(1, sizeof(*e->buffers));
     if (!e->buffers) die("out of memory");
     e->buffer_count = 1;
@@ -1084,6 +1088,7 @@ void editor_insert_char(Editor *e, unsigned int cp) {
     e->cursor++;
     e->desired_col = byte_col(&e->text, e->cursor);
     editor_reparse(e);
+    if (isalnum((unsigned char)c) || c == '_' || c == '.' || c == '>') lsp_request_completion(e);
 }
 
 static void editor_backspace(Editor *e) {
@@ -2037,6 +2042,9 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->pending = 0;
     } else if (c == 'u') {
         editor_undo(e);
+    } else if (c == 'K') {
+        lsp_request_hover(e);
+        e->pending = 0;
     } else if (c == 'm') {
         e->waiting_char = 'm';
         e->suppress_next_char = true;
@@ -2200,6 +2208,10 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     } else if (c == 'r') {
         e->waiting_char = 'r';
         e->suppress_next_char = true;
+    } else if ((c == 'd' || c == 'D') && e->pending == 'g') {
+        lsp_request_definition(e, c == 'D');
+        e->pending = 0;
+        e->count = 0;
     } else if ((c == 't' || c == 'T') && e->pending == 'g') {
         editor_tab_switch(e, c == 't' ? 1 : -1);
         e->pending = 0;

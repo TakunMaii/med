@@ -12,6 +12,8 @@
 - Normal/visual block cursor and insert bar cursor
 - Fading cursor trail while moving, similar to terminal/editor cursor effects
 - Tree-sitter powered C syntax highlighting
+- LSP client architecture with bundled cJSON; first server support is `clangd` for C/C++
+- GUI hover and completion popups rendered over the editor surface
 
 ## Build
 
@@ -61,4 +63,10 @@ ctest --test-dir build --output-on-failure
 - `:e path`: open a file in a new buffer
 - `:bnew`, `:bn`, `:bp`, `:bfirst`, `:blast`, `:buffer N`, `:ls`, `:bd`, `:bd!`: buffer commands; `:ls` uses multiline output
 - Windows/tabs: `Ctrl-w s`, `Ctrl-w v`, `Ctrl-w w`, `Ctrl-w q`, `Ctrl-w c`, `Ctrl-w o`, `Ctrl-w h/j/k/l`, `gt`, `gT`
+- LSP: `K` requests hover, `gd` jumps to definition, `gD` jumps to declaration
+- Completion: automatically requested in insert mode for C/C++ buffers; `Tab`/`Ctrl-n` selects next, `Shift-Tab`/`Ctrl-p` selects previous, `Enter`/`Ctrl-y` accepts
 - `:set number`, `:set nonumber`, `:set relativenumber`, `:set norelativenumber`
+
+## LSP
+
+`med` starts `clangd` automatically for C/C++ files and communicates through LSP JSON-RPC over stdio. File changes are synchronized with full-document `didChange` messages. Diagnostics currently surface ERROR-level messages, matching the local Neovim configuration.

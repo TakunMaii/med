@@ -17,6 +17,7 @@ add_executable(med
   src/main.c
   src/common.c
   src/editor.c
+  src/lsp.c
   src/vulkan_app.c
   third_party/cjson/cJSON.c
 )
@@ -93,6 +94,7 @@ add_executable(med_editor_tests
   src/editor_tests.c
   src/common.c
   src/editor.c
+  src/lsp.c
   third_party/cjson/cJSON.c
 )
 

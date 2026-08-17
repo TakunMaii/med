@@ -606,6 +606,22 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
     int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - tab_h - app->vk.font.line_h * (1.0f + (float)command_lines)) / app->vk.font.line_h) : 1;
     if (rows < 1) rows = 1;
     if (e->waiting_char && key != GLFW_KEY_ESCAPE) return;
+    if (e->mode == MODE_INSERT && e->lsp.completion_visible) {
+        if (key == GLFW_KEY_TAB || ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_N)) {
+            lsp_completion_move(e, 1);
+            return;
+        }
+        if (((mods & GLFW_MOD_SHIFT) && key == GLFW_KEY_TAB) || ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_P)) {
+            lsp_completion_move(e, -1);
+            return;
+        }
+        if (key == GLFW_KEY_ENTER || ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_Y)) {
+            if (lsp_completion_accept(e)) return;
+        }
+        if (key == GLFW_KEY_ESCAPE) {
+            e->lsp.completion_visible = false;
+        }
+    }
     if (e->mode == MODE_COMMAND) {
         if (key == GLFW_KEY_ESCAPE) {
             e->mode = MODE_NORMAL;
@@ -1064,6 +1080,54 @@ static void draw_editor_pane(App *owner, DrawList *dl, Editor *pe, float x0, flo
     draw_text(dl, &vk->font, label, x0 + 5.0f, y0 + h - line_h + 1.0f, active ? gruvbox.line_no_current : gruvbox.gutter_fg);
 }
 
+static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float editor_h) {
+    Editor *e = &owner->editor;
+    VkApp *vk = &owner->vk;
+    float cell = vk->font.cell_w;
+    float line_h = vk->font.line_h;
+    int line = byte_line(&e->text, e->cursor);
+    int col = byte_col(&e->text, e->cursor);
+    int gutter_digits = (int)log10((double)(line_count(&e->text) + 1)) + 2;
+    float gutter_w = (float)gutter_digits * cell + 18.0f;
+    float x = gutter_w + 8.0f + (float)(col - e->left_col) * cell;
+    float y = editor_y + (float)(line - e->top_line + 1) * line_h + 2.0f;
+    if (y < editor_y || y > editor_y + editor_h) return;
+    Color popup_bg = gruvbox.gutter_bg;
+    popup_bg.r += 0.035f;
+    popup_bg.g += 0.035f;
+    popup_bg.b += 0.035f;
+    if (popup_bg.r > 1.0f) popup_bg.r = 1.0f;
+    if (popup_bg.g > 1.0f) popup_bg.g = 1.0f;
+    if (popup_bg.b > 1.0f) popup_bg.b = 1.0f;
+    if (e->lsp.completion_visible && e->lsp.completion_count > 0) {
+        size_t rows = e->lsp.completion_count < 8 ? e->lsp.completion_count : 8;
+        float w = 42.0f * cell;
+        float h = (float)rows * line_h + 6.0f;
+        if (x + w > (float)vk->extent.width) x = (float)vk->extent.width - w - 8.0f;
+        draw_rect(dl, x, y, w, h, popup_bg);
+        draw_rect(dl, x, y, w, 1.0f, gruvbox.gutter_fg);
+        draw_rect(dl, x, y + h - 1.0f, w, 1.0f, gruvbox.gutter_fg);
+        for (size_t i = 0; i < rows; i++) {
+            float row_y = y + 3.0f + (float)i * line_h;
+            if (i == e->lsp.completion_selected) draw_rect(dl, x + 2.0f, row_y, w - 4.0f, line_h, gruvbox.selection);
+            char item[256];
+            snprintf(item, sizeof(item), "%-24.24s %.24s", e->lsp.completions[i], e->lsp.completion_details[i]);
+            draw_text(dl, &vk->font, item, x + 6.0f, row_y + 1.0f, gruvbox.fg);
+        }
+    }
+    if (e->lsp.hover_visible && e->lsp.hover[0]) {
+        float hx = x;
+        float hy = y + line_h;
+        float hw = 72.0f * cell;
+        float hh = 8.0f * line_h;
+        if (hy + hh > editor_y + editor_h) hy = y - hh - line_h;
+        if (hx + hw > (float)vk->extent.width) hx = (float)vk->extent.width - hw - 8.0f;
+        draw_rect(dl, hx, hy, hw, hh, popup_bg);
+        draw_rect(dl, hx, hy, hw, 1.0f, gruvbox.gutter_fg);
+        draw_wrapped_text(dl, &vk->font, e->lsp.hover, hx + 8.0f, hy + 5.0f, 70, 7, gruvbox.fg);
+    }
+}
+
 static void build_draw_list(App *owner, DrawList *dl) {
     Editor *e = &owner->editor;
     VkApp *vk = &owner->vk;
@@ -1096,6 +1160,7 @@ static void build_draw_list(App *owner, DrawList *dl) {
             draw_editor_pane(owner, dl, &tmp, panes[i].x, panes[i].y, panes[i].w, panes[i].h, false, command_y);
         }
     }
+    draw_lsp_popups(owner, dl, editor_y, editor_h);
     draw_rect(dl, 0, status_y, w, line_h, gruvbox.gutter_bg);
     draw_rect(dl, 0, command_y, w, command_h, gruvbox.bg);
     char pending[64];
@@ -1104,10 +1169,17 @@ static void build_draw_list(App *owner, DrawList *dl) {
     const char *path = e->path[0] ? e->path : "[No Name]";
     int cursor_display_line = byte_line(&e->text, e->cursor) + 1;
     int cursor_display_col = byte_col(&e->text, e->cursor) + 1;
-    snprintf(status, sizeof(status), "%s  [%zu/%zu]%s  %s  Ln %d, Col %d  %s%s",
+    char diagnostic[256] = "";
+    for (size_t i = 0; i < e->lsp.diagnostic_count; i++) {
+        if (e->lsp.diagnostics[i].line == cursor_display_line - 1) {
+            snprintf(diagnostic, sizeof(diagnostic), "  E: %.120s", e->lsp.diagnostics[i].message);
+            break;
+        }
+    }
+    snprintf(status, sizeof(status), "%s  [%zu/%zu]%s  %.360s  Ln %d, Col %d  %s%.48s%.160s",
              mode_name(e), e->current_buffer + 1, e->buffer_count, e->dirty ? " +" : "",
              path, cursor_display_line, cursor_display_col, pending[0] ? "keys: " : "",
-             pending);
+             pending, diagnostic);
     draw_text(dl, &vk->font, status, 8.0f, status_y + 1.0f, gruvbox.line_no_current);
     if (e->mode == MODE_COMMAND) {
         char command[EDITOR_COMMAND_MAX + 2];

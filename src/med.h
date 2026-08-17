@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
+#include <sys/types.h>
 
 #ifndef MED_SHADER_DIR
 #define MED_SHADER_DIR "."
@@ -183,6 +184,43 @@ typedef struct {
 } MacroRegister;
 
 typedef struct {
+    char message[512];
+    int line;
+    int col;
+    int severity;
+} LspDiagnostic;
+
+typedef struct {
+    bool running;
+    bool initialized;
+    bool opened;
+    bool needs_sync;
+    pid_t pid;
+    int in_fd;
+    int out_fd;
+    int next_id;
+    int hover_id;
+    int completion_id;
+    int definition_id;
+    int declaration_id;
+    int version;
+    char server_name[32];
+    char root[1024];
+    char uri[1024];
+    char read_buf[131072];
+    size_t read_len;
+    char hover[4096];
+    bool hover_visible;
+    char completions[32][160];
+    char completion_details[32][160];
+    size_t completion_count;
+    size_t completion_selected;
+    bool completion_visible;
+    LspDiagnostic diagnostics[64];
+    size_t diagnostic_count;
+} LspClient;
+
+typedef struct {
     Text text;
     char path[512];
     bool dirty;
@@ -263,6 +301,7 @@ typedef struct {
     TSQuery *query;
     TSTree *tree;
     Highlights highlights;
+    LspClient lsp;
     BufferSlot *buffers;
     size_t buffer_count;
     size_t current_buffer;
@@ -411,6 +450,17 @@ void editor_focus_view_direction(Editor *e, char dir);
 void editor_tab_new(Editor *e, const char *path);
 void editor_tab_switch(Editor *e, int delta);
 void editor_tab_close(Editor *e);
+
+void lsp_init(LspClient *lsp);
+void lsp_shutdown(LspClient *lsp);
+void lsp_maybe_start(Editor *e);
+void lsp_poll(Editor *e);
+void lsp_sync_if_needed(Editor *e);
+void lsp_request_hover(Editor *e);
+void lsp_request_completion(Editor *e);
+void lsp_request_definition(Editor *e, bool declaration);
+bool lsp_completion_accept(Editor *e);
+void lsp_completion_move(Editor *e, int delta);
 
 void vk_init(App *owner);
 void draw_frame(App *owner);
