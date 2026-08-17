@@ -10,6 +10,7 @@
 - Vim-like modes: normal, insert, visual
 - Relative line numbers in the left gutter
 - Normal/visual block cursor and insert bar cursor
+- Fading cursor trail while moving, similar to terminal/editor cursor effects
 - Tree-sitter powered C syntax highlighting
 
 ## Build

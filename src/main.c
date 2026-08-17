@@ -27,6 +27,8 @@
 #define ATLAS_W 1024
 #define ATLAS_H 1024
 #define MAX_VERTICES 262144
+#define CURSOR_TRAIL_MAX 18
+#define CURSOR_TRAIL_SECONDS 0.28
 
 typedef struct {
     float r, g, b, a;
@@ -97,6 +99,13 @@ typedef struct {
 } Highlights;
 
 typedef struct {
+    int line;
+    int col;
+    Mode mode;
+    double time;
+} CursorTrail;
+
+typedef struct {
     Text text;
     char path[512];
     bool dirty;
@@ -146,6 +155,8 @@ typedef struct {
     bool yank_linewise;
     SnapshotStack undo;
     SnapshotStack redo;
+    CursorTrail cursor_trail[CURSOR_TRAIL_MAX];
+    size_t cursor_trail_len;
     TSLanguage *c_lang;
     TSParser *parser;
     TSQuery *query;
@@ -782,6 +793,7 @@ static void editor_load_buffer(Editor *e, size_t index) {
     e->count = 0;
     e->operator_count = 0;
     e->waiting_char = 0;
+    e->cursor_trail_len = 0;
 }
 
 static void editor_add_buffer(Editor *e, const char *path, const char *content, size_t len) {
@@ -908,6 +920,21 @@ static void editor_ensure_visible(Editor *e, int rows, int cols) {
     if (col < e->left_col) e->left_col = col;
     if (col >= e->left_col + cols) e->left_col = col - cols + 1;
     if (e->left_col < 0) e->left_col = 0;
+}
+
+static void editor_push_cursor_trail(Editor *e, int line, int col, Mode mode, double now) {
+    if (line < 0 || col < 0) return;
+    if (e->cursor_trail_len == CURSOR_TRAIL_MAX) {
+        memmove(e->cursor_trail, e->cursor_trail + 1, sizeof(e->cursor_trail[0]) * (CURSOR_TRAIL_MAX - 1));
+        e->cursor_trail_len--;
+    }
+    e->cursor_trail[e->cursor_trail_len++] = (CursorTrail){line, col, mode, now};
+}
+
+static void editor_record_cursor_if_moved(Editor *e, int old_line, int old_col, Mode old_mode, double now) {
+    int new_line = byte_line(&e->text, e->cursor);
+    int new_col = byte_col(&e->text, e->cursor);
+    if (old_line != new_line || old_col != new_col) editor_push_cursor_trail(e, old_line, old_col, old_mode, now);
 }
 
 static void editor_yank_range(Editor *e, size_t start, size_t end);
@@ -2018,6 +2045,10 @@ static void app_execute_command(App *app) {
 static void char_cb(GLFWwindow *window, unsigned int cp) {
     App *app = glfwGetWindowUserPointer(window);
     Editor *e = &app->editor;
+    int old_line = byte_line(&e->text, e->cursor);
+    int old_col = byte_col(&e->text, e->cursor);
+    Mode old_mode = e->mode;
+    bool track_cursor = e->mode != MODE_COMMAND && !e->suppress_next_char;
     if (e->suppress_next_char) {
         e->suppress_next_char = false;
         return;
@@ -2036,35 +2067,44 @@ static void char_cb(GLFWwindow *window, unsigned int cp) {
         e->command_len = 0;
         e->command[0] = 0;
     }
+    if (track_cursor) editor_record_cursor_if_moved(e, old_line, old_col, old_mode, glfwGetTime());
 }
 
 static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mods) {
     (void)scancode;
     if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
     App *app = glfwGetWindowUserPointer(window);
+    Editor *e = &app->editor;
+    int old_line = byte_line(&e->text, e->cursor);
+    int old_col = byte_col(&e->text, e->cursor);
+    Mode old_mode = e->mode;
+    bool track_cursor = e->mode != MODE_COMMAND;
     int fbw = 0, fbh = 0;
     glfwGetFramebufferSize(window, &fbw, &fbh);
     int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - app->vk.font.line_h) / app->vk.font.line_h) : 1;
     if (rows < 1) rows = 1;
-    if (app->editor.mode == MODE_COMMAND) {
+    if (e->mode == MODE_COMMAND) {
         if (key == GLFW_KEY_ESCAPE) {
-            app->editor.mode = MODE_NORMAL;
-            app->editor.command_len = 0;
-            app->editor.command[0] = 0;
+            e->mode = MODE_NORMAL;
+            e->command_len = 0;
+            e->command[0] = 0;
             return;
         }
         if (key == GLFW_KEY_ENTER) {
+            bool search_cmd = e->command[0] == '/' || e->command[0] == '?';
             app_execute_command(app);
+            if (search_cmd) editor_record_cursor_if_moved(e, old_line, old_col, MODE_NORMAL, glfwGetTime());
             return;
         }
         if (key == GLFW_KEY_BACKSPACE) {
-            if (app->editor.command_len > 0) app->editor.command[--app->editor.command_len] = 0;
-            else app->editor.mode = MODE_NORMAL;
+            if (e->command_len > 0) e->command[--e->command_len] = 0;
+            else e->mode = MODE_NORMAL;
             return;
         }
         return;
     }
-    editor_key(&app->editor, key, mods, rows);
+    editor_key(e, key, mods, rows);
+    if (track_cursor) editor_record_cursor_if_moved(e, old_line, old_col, old_mode, glfwGetTime());
 }
 
 static void vk_init(App *owner) {
@@ -2204,6 +2244,32 @@ static void build_draw_list(App *owner, DrawList *dl) {
     }
     int c_line = cursor_line - e->top_line;
     int c_col = byte_col(&e->text, e->cursor) - e->left_col;
+    double now = glfwGetTime();
+    size_t keep = 0;
+    for (size_t i = 0; i < e->cursor_trail_len; i++) {
+        CursorTrail tr = e->cursor_trail[i];
+        double age = now - tr.time;
+        if (age >= CURSOR_TRAIL_SECONDS) continue;
+        e->cursor_trail[keep++] = tr;
+        int row = tr.line - e->top_line;
+        int col = tr.col - e->left_col;
+        if (row < 0 || row >= rows || col < 0) continue;
+        float fade = (float)(1.0 - age / CURSOR_TRAIL_SECONDS);
+        fade = fade * fade;
+        float x = gutter_w + 8.0f + col * cell;
+        float y = row * line_h + 2.0f;
+        if (x > w) continue;
+        if (tr.mode == MODE_INSERT) {
+            Color c = gruvbox.cursor_insert;
+            c.a = 0.55f * fade;
+            draw_rect(dl, x, y + 2.0f, 2.0f, line_h - 4.0f, c);
+        } else {
+            Color c = gruvbox.cursor;
+            c.a = 0.32f * fade;
+            draw_rect(dl, x, y, cell, line_h, c);
+        }
+    }
+    e->cursor_trail_len = keep;
     if (c_line >= 0 && c_line < rows && c_col >= 0) {
         float x = gutter_w + 8.0f + c_col * cell;
         float y = c_line * line_h + 2.0f;
