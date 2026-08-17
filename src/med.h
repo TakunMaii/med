@@ -28,7 +28,7 @@
 #define MED_DEFAULT_FONT "/usr/share/fonts/myfonts/CaskaydiaCove/CaskaydiaCoveNerdFontMono-Regular.ttf"
 #endif
 
-#define MED_FONT_SIZE 14
+#define MED_FONT_SIZE 16
 #define MAX_FRAMES 2
 #define ATLAS_W 1024
 #define ATLAS_H 1024

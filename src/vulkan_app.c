@@ -13,6 +13,23 @@ static Color color_for_highlight(HighlightKind kind) {
     }
 }
 
+typedef enum {
+    TEXT_STYLE_NORMAL = 0,
+    TEXT_STYLE_ITALIC = 1 << 0,
+    TEXT_STYLE_BOLD = 1 << 1,
+} TextStyle;
+
+static TextStyle style_for_highlight(HighlightKind kind) {
+    switch (kind) {
+    case HL_FUNCTION: return TEXT_STYLE_BOLD;
+    case HL_STRING:
+    case HL_KEYWORD:
+        return TEXT_STYLE_ITALIC;
+    default:
+        return TEXT_STYLE_NORMAL;
+    }
+}
+
 typedef struct {
     float screen_size[2];
     float rect_min[2];
@@ -691,28 +708,41 @@ static void draw_rect(DrawList *dl, float x, float y, float w, float h, Color c)
     for (int i = 0; i < 6; i++) dl_push(dl, v[i]);
 }
 
-static void draw_glyph(DrawList *dl, FontAtlas *font, char ch, float x, float y, Color c) {
+static void draw_glyph_quad(DrawList *dl, Glyph *g, float x0_top, float x1_top, float x0_bottom, float x1_bottom, float y0, float y1, Color c) {
+    Vertex v[6] = {
+        {x0_top, y0, g->u0, g->v0, c.r, c.g, c.b, c.a, 1}, {x1_top, y0, g->u1, g->v0, c.r, c.g, c.b, c.a, 1}, {x1_bottom, y1, g->u1, g->v1, c.r, c.g, c.b, c.a, 1},
+        {x0_top, y0, g->u0, g->v0, c.r, c.g, c.b, c.a, 1}, {x1_bottom, y1, g->u1, g->v1, c.r, c.g, c.b, c.a, 1}, {x0_bottom, y1, g->u0, g->v1, c.r, c.g, c.b, c.a, 1},
+    };
+    for (int i = 0; i < 6; i++) dl_push(dl, v[i]);
+}
+
+static void draw_glyph(DrawList *dl, FontAtlas *font, char ch, float x, float y, Color c, TextStyle style) {
     if ((unsigned char)ch >= 127 || ch < 32) return;
     Glyph *g = &font->glyphs[(int)ch];
     float x0 = x + g->bearing_x;
     float y0 = y + font->ascent - g->bearing_y;
     float x1 = x0 + g->x1;
     float y1 = y0 + g->y1;
-    Vertex v[6] = {
-        {x0, y0, g->u0, g->v0, c.r, c.g, c.b, c.a, 1}, {x1, y0, g->u1, g->v0, c.r, c.g, c.b, c.a, 1}, {x1, y1, g->u1, g->v1, c.r, c.g, c.b, c.a, 1},
-        {x0, y0, g->u0, g->v0, c.r, c.g, c.b, c.a, 1}, {x1, y1, g->u1, g->v1, c.r, c.g, c.b, c.a, 1}, {x0, y1, g->u0, g->v1, c.r, c.g, c.b, c.a, 1},
-    };
-    for (int i = 0; i < 6; i++) dl_push(dl, v[i]);
+    float top_shift = 0.0f;
+    float bottom_shift = 0.0f;
+    if (style & TEXT_STYLE_ITALIC) {
+        float slant = 0.22f;
+        top_shift = g->y1 * slant;
+    }
+    draw_glyph_quad(dl, g, x0 + top_shift, x1 + top_shift, x0 + bottom_shift, x1 + bottom_shift, y0, y1, c);
+    if (style & TEXT_STYLE_BOLD) {
+        draw_glyph_quad(dl, g, x0 + top_shift + 0.9f, x1 + top_shift + 0.9f, x0 + bottom_shift + 0.9f, x1 + bottom_shift + 0.9f, y0, y1, c);
+    }
 }
 
-static void draw_text(DrawList *dl, FontAtlas *font, const char *s, float x, float y, Color c) {
+static void draw_text(DrawList *dl, FontAtlas *font, const char *s, float x, float y, Color c, TextStyle style) {
     for (size_t i = 0; s[i]; i++) {
-        draw_glyph(dl, font, s[i], x, y, c);
+        draw_glyph(dl, font, s[i], x, y, c, style);
         x += font->cell_w;
     }
 }
 
-static void draw_wrapped_text(DrawList *dl, FontAtlas *font, const char *s, float x, float y, int cols, int max_lines, Color c) {
+static void draw_wrapped_text(DrawList *dl, FontAtlas *font, const char *s, float x, float y, int cols, int max_lines, Color c, TextStyle style) {
     if (cols < 1) cols = 1;
     int col = 0;
     int line = 0;
@@ -730,7 +760,7 @@ static void draw_wrapped_text(DrawList *dl, FontAtlas *font, const char *s, floa
             continue;
         }
         last_newline = false;
-        draw_glyph(dl, font, s[i], x, y, c);
+        draw_glyph(dl, font, s[i], x, y, c, style);
         x += font->cell_w;
         col++;
         if (col >= cols) {
@@ -941,7 +971,7 @@ static void draw_tab_bar(App *owner, DrawList *dl, float w, float line_h) {
         Color bg = i == e->current_tab ? gruvbox.bg : gruvbox.gutter_bg;
         draw_rect(dl, x, 3.0f, tab_w, line_h - 2.0f, bg);
         if (i == e->current_tab) draw_rect(dl, x, line_h + 1.0f, tab_w, 2.0f, gruvbox.line_no_current);
-        draw_text(dl, &vk->font, label, x + 10.0f, 4.0f, i == e->current_tab ? gruvbox.line_no_current : gruvbox.gutter_fg);
+        draw_text(dl, &vk->font, label, x + 10.0f, 4.0f, i == e->current_tab ? gruvbox.line_no_current : gruvbox.gutter_fg, TEXT_STYLE_NORMAL);
         x += tab_w + 4.0f;
         if (x > w) break;
     }
@@ -1099,18 +1129,20 @@ static void draw_editor_pane(App *owner, DrawList *dl, Editor *pe, float x0, flo
         int pad = width > raw_len ? width - raw_len : 0;
         memset(num, ' ', (size_t)pad);
         snprintf(num + pad, sizeof(num) - (size_t)pad, "%s", raw);
-        if (pe->show_number) draw_text(dl, &vk->font, num, x0 + 8.0f, y, rel == 0 && active ? gruvbox.line_no_current : gruvbox.gutter_fg);
+        if (pe->show_number) draw_text(dl, &vk->font, num, x0 + 8.0f, y, rel == 0 && active ? gruvbox.line_no_current : gruvbox.gutter_fg, TEXT_STYLE_NORMAL);
         size_t start = line_start_by_number(&pe->text, line_no);
         size_t end = line_end_at(&pe->text, start);
         float x = x0 + gutter_w + 8.0f;
         for (size_t p = start + (size_t)pe->left_col; p < end; p++) {
             if (in_selection(pe, p)) draw_rect(dl, x, y, cell, line_h, gruvbox.selection);
             else if (in_search_match(pe, p)) draw_rect(dl, x, y, cell, line_h, gruvbox.search_match);
-            Color c = color_for_highlight(highlight_at(pe, p));
+            HighlightKind hl = highlight_at(pe, p);
+            Color c = color_for_highlight(hl);
+            TextStyle style = style_for_highlight(hl);
             char ch = pe->text.data[p];
             if (ch == '\t') x += cell * 4.0f;
             else {
-                draw_glyph(dl, &vk->font, ch, x, y, c);
+                draw_glyph(dl, &vk->font, ch, x, y, c, style);
                 x += cell;
             }
             if (x > x0 + w) break;
@@ -1120,7 +1152,7 @@ static void draw_editor_pane(App *owner, DrawList *dl, Editor *pe, float x0, flo
     const BufferSlot *buffer = pe->current_buffer < pe->buffer_count ? &pe->buffers[pe->current_buffer] : NULL;
     snprintf(label, sizeof(label), " %zu:%s%s ", pe->current_buffer + 1, buffer ? buffer_display_name(buffer) : "[No Name]", pe->dirty ? " +" : "");
     draw_rect(dl, x0 + 1.0f, y0 + h - line_h, fminf((float)strlen(label) * cell + 8.0f, w - 2.0f), line_h - 1.0f, gruvbox.gutter_bg);
-    draw_text(dl, &vk->font, label, x0 + 5.0f, y0 + h - line_h + 1.0f, active ? gruvbox.line_no_current : gruvbox.gutter_fg);
+    draw_text(dl, &vk->font, label, x0 + 5.0f, y0 + h - line_h + 1.0f, active ? gruvbox.line_no_current : gruvbox.gutter_fg, TEXT_STYLE_NORMAL);
 }
 
 static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float editor_h) {
@@ -1173,7 +1205,7 @@ static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float edit
             char item[320];
             if (e->lsp.completion_details[item_index][0]) snprintf(item, sizeof(item), "%.64s %.63s", e->lsp.completions[item_index], e->lsp.completion_details[item_index]);
             else snprintf(item, sizeof(item), "%.128s", e->lsp.completions[item_index]);
-            draw_text(dl, &vk->font, item, x + 6.0f, row_y + 1.0f, gruvbox.fg);
+            draw_text(dl, &vk->font, item, x + 6.0f, row_y + 1.0f, gruvbox.fg, TEXT_STYLE_NORMAL);
         }
     }
     if (e->lsp.hover_visible && e->lsp.hover[0]) {
@@ -1198,7 +1230,7 @@ static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float edit
         draw_rect(dl, hx, hy, hw, 1.0f, gruvbox.gutter_fg);
         int hover_cols = (int)((hw - 16.0f) / cell);
         int hover_lines = (int)((hh - 8.0f) / line_h);
-        draw_wrapped_text(dl, &vk->font, e->lsp.hover, hx + 8.0f, hy + 5.0f, hover_cols, hover_lines, gruvbox.fg);
+        draw_wrapped_text(dl, &vk->font, e->lsp.hover, hx + 8.0f, hy + 5.0f, hover_cols, hover_lines, gruvbox.fg, TEXT_STYLE_NORMAL);
     }
 }
 
@@ -1254,15 +1286,15 @@ static void build_draw_list(App *owner, DrawList *dl) {
              mode_name(e), e->current_buffer + 1, e->buffer_count, e->dirty ? " +" : "",
              path, cursor_display_line, cursor_display_col, pending[0] ? "keys: " : "",
              pending, diagnostic);
-    draw_text(dl, &vk->font, status, 8.0f, status_y + 1.0f, gruvbox.line_no_current);
+    draw_text(dl, &vk->font, status, 8.0f, status_y + 1.0f, gruvbox.line_no_current, TEXT_STYLE_NORMAL);
     if (e->mode == MODE_COMMAND) {
         char command[EDITOR_COMMAND_MAX + 2];
         snprintf(command, sizeof(command), ":%s", e->command);
         int cols = vk->font.cell_w > 0.0f ? (int)((w - 16.0f) / vk->font.cell_w) : 80;
-        draw_wrapped_text(dl, &vk->font, command, 8.0f, command_y + 1.0f, cols, command_lines, gruvbox.line_no_current);
+        draw_wrapped_text(dl, &vk->font, command, 8.0f, command_y + 1.0f, cols, command_lines, gruvbox.line_no_current, TEXT_STYLE_NORMAL);
     } else if (e->status[0]) {
         int cols = vk->font.cell_w > 0.0f ? (int)((w - 16.0f) / vk->font.cell_w) : 80;
-        draw_wrapped_text(dl, &vk->font, e->status, 8.0f, command_y + 1.0f, cols, command_lines, gruvbox.line_no_current);
+        draw_wrapped_text(dl, &vk->font, e->status, 8.0f, command_y + 1.0f, cols, command_lines, gruvbox.line_no_current, TEXT_STYLE_NORMAL);
     }
 }
 
