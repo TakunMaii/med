@@ -273,6 +273,7 @@ static void parse_completion(Editor *e, cJSON *result) {
         snprintf(e->lsp.completion_details[i], sizeof(e->lsp.completion_details[i]), "%s", cJSON_IsString(detail) ? detail->valuestring : "");
     }
     e->lsp.completion_selected = 0;
+    e->lsp.completion_scroll = 0;
     e->lsp.completion_visible = e->lsp.completion_count > 0;
 }
 
@@ -400,4 +401,13 @@ void lsp_completion_move(Editor *e, int delta) {
     size_t n = e->lsp.completion_count;
     if (delta > 0) e->lsp.completion_selected = (e->lsp.completion_selected + 1) % n;
     else e->lsp.completion_selected = e->lsp.completion_selected == 0 ? n - 1 : e->lsp.completion_selected - 1;
+    const size_t visible_rows = 8;
+    if (e->lsp.completion_selected < e->lsp.completion_scroll) {
+        e->lsp.completion_scroll = e->lsp.completion_selected;
+    } else if (e->lsp.completion_selected >= e->lsp.completion_scroll + visible_rows) {
+        e->lsp.completion_scroll = e->lsp.completion_selected + 1 - visible_rows;
+    }
+    if (e->lsp.completion_scroll + visible_rows > n) {
+        e->lsp.completion_scroll = n > visible_rows ? n - visible_rows : 0;
+    }
 }

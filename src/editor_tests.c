@@ -517,6 +517,27 @@ static void test_gd_and_gD_request_lsp_before_delete_operator(void) {
     close(e.lsp.in_fd);
 }
 
+static void test_lsp_completion_selection_scrolls_visible_window(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    e.lsp.completion_visible = true;
+    e.lsp.completion_count = 12;
+    e.lsp.completion_selected = 0;
+    e.lsp.completion_scroll = 0;
+
+    for (int i = 0; i < 8; i++) lsp_completion_move(&e, 1);
+    assert(e.lsp.completion_selected == 8);
+    assert(e.lsp.completion_scroll == 1);
+
+    lsp_completion_move(&e, -1);
+    assert(e.lsp.completion_selected == 7);
+    assert(e.lsp.completion_scroll == 1);
+
+    for (int i = 0; i < 8; i++) lsp_completion_move(&e, -1);
+    assert(e.lsp.completion_selected == 11);
+    assert(e.lsp.completion_scroll == 4);
+}
+
 static void test_visual_block_delete(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -617,6 +638,7 @@ int main(void) {
     test_visual_block_insert_and_append();
     test_regex_substitute_and_global();
     test_gd_and_gD_request_lsp_before_delete_operator();
+    test_lsp_completion_selection_scrolls_visible_window();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();

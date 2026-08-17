@@ -1101,6 +1101,9 @@ static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float edit
     if (popup_bg.b > 1.0f) popup_bg.b = 1.0f;
     if (e->lsp.completion_visible && e->lsp.completion_count > 0) {
         size_t rows = e->lsp.completion_count < 8 ? e->lsp.completion_count : 8;
+        size_t first = e->lsp.completion_scroll;
+        if (first >= e->lsp.completion_count) first = 0;
+        if (first + rows > e->lsp.completion_count) rows = e->lsp.completion_count - first;
         float w = 42.0f * cell;
         float h = (float)rows * line_h + 6.0f;
         if (x + w > (float)vk->extent.width) x = (float)vk->extent.width - w - 8.0f;
@@ -1108,10 +1111,11 @@ static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float edit
         draw_rect(dl, x, y, w, 1.0f, gruvbox.gutter_fg);
         draw_rect(dl, x, y + h - 1.0f, w, 1.0f, gruvbox.gutter_fg);
         for (size_t i = 0; i < rows; i++) {
+            size_t item_index = first + i;
             float row_y = y + 3.0f + (float)i * line_h;
-            if (i == e->lsp.completion_selected) draw_rect(dl, x + 2.0f, row_y, w - 4.0f, line_h, gruvbox.selection);
+            if (item_index == e->lsp.completion_selected) draw_rect(dl, x + 2.0f, row_y, w - 4.0f, line_h, gruvbox.selection);
             char item[256];
-            snprintf(item, sizeof(item), "%-24.24s %.24s", e->lsp.completions[i], e->lsp.completion_details[i]);
+            snprintf(item, sizeof(item), "%-24.24s %.24s", e->lsp.completions[item_index], e->lsp.completion_details[item_index]);
             draw_text(dl, &vk->font, item, x + 6.0f, row_y + 1.0f, gruvbox.fg);
         }
     }

@@ -215,6 +215,7 @@ typedef struct {
     char completion_details[32][160];
     size_t completion_count;
     size_t completion_selected;
+    size_t completion_scroll;
     bool completion_visible;
     LspDiagnostic diagnostics[64];
     size_t diagnostic_count;
