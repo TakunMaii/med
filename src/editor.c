@@ -2144,6 +2144,10 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->mode = MODE_INSERT;
         e->suppress_next_char = true;
         snprintf(e->last_change, sizeof(e->last_change), "%c", c);
+    } else if ((c == 'd' || c == 'D') && e->pending == 'g') {
+        lsp_request_definition(e, c == 'D');
+        e->pending = 0;
+        e->count = 0;
     } else if (c == 'D') {
         size_t end = line_end_at(&e->text, e->cursor);
         editor_begin_change(e);
@@ -2208,10 +2212,6 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     } else if (c == 'r') {
         e->waiting_char = 'r';
         e->suppress_next_char = true;
-    } else if ((c == 'd' || c == 'D') && e->pending == 'g') {
-        lsp_request_definition(e, c == 'D');
-        e->pending = 0;
-        e->count = 0;
     } else if ((c == 't' || c == 'T') && e->pending == 'g') {
         editor_tab_switch(e, c == 't' ? 1 : -1);
         e->pending = 0;

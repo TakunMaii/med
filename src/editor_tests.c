@@ -1,5 +1,8 @@
 #include "med.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 static void reset_editor_text(Editor *e, const char *text, size_t cursor) {
     text_set(&e->text, text, strlen(text));
     e->cursor = cursor;
@@ -491,6 +494,29 @@ static void test_regex_substitute_and_global(void) {
     assert(strcmp(e.text.data, "bar\n") == 0);
 }
 
+static void test_gd_and_gD_request_lsp_before_delete_operator(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "int main(void) { return 0; }\n", 4);
+    e.lsp.running = true;
+    e.lsp.opened = true;
+    e.lsp.in_fd = open("/dev/null", O_WRONLY);
+    assert(e.lsp.in_fd >= 0);
+
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_D, 0, 20);
+    assert(e.operator_pending == 0);
+    assert(e.pending == 0);
+    assert(e.lsp.definition_id > 0);
+
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_D, GLFW_MOD_SHIFT, 20);
+    assert(e.operator_pending == 0);
+    assert(e.pending == 0);
+    assert(e.lsp.declaration_id > 0);
+    close(e.lsp.in_fd);
+}
+
 static void test_visual_block_delete(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -590,6 +616,7 @@ int main(void) {
     test_dot_replays_operator_change();
     test_visual_block_insert_and_append();
     test_regex_substitute_and_global();
+    test_gd_and_gD_request_lsp_before_delete_operator();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();
