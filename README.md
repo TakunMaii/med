@@ -24,27 +24,24 @@ cmake --build build
 ```sh
 ./build/med
 ./build/med path/to/file.c
+./build/med a.c b.c
 ```
 
 ## Keys
 
-- `h j k l` / arrow keys: move
-- `w b e`: word motions
-- `0` / `$`: line start / line end
-- `gg` / `G`: file start / file end
-- `i`: enter insert mode
-- `a`: append and enter insert mode
-- `I` / `A`: insert at line start / append at line end
+- Counts: `3j`, `10dd`, `5w`
+- Motions: `h j k l`, arrow keys, `w b e`, `0 $ ^ _ + -`, `gg G`, `H M L`, `%`
+- Find on line: `f F t T`, repeat with `;` and `,`
+- Scrolling: `Ctrl-d`, `Ctrl-u`, `Ctrl-f`, `Ctrl-b`, `zz`, `zt`, `zb`
+- Insert: `i`, `a`, `I`, `A`, `o`, `O`
 - `Esc`: return to normal mode
-- `v`: enter visual mode
-- `y` / `yy`: yank selection or current line
-- `p`: paste after cursor or below current line
-- `x`: delete character or visual selection
-- `dd`: delete current line
-- `D`: delete to end of line
-- `o` / `O`: open a line below / above and enter insert mode
-- `Ctrl-d` / `Ctrl-u`: scroll down / up
-- `:w`, `:q`, `:wq`: write, quit, write and quit
+- Visual: `v` for character selection, `V` for line selection
+- Operators: `d`, `c`, `y` with motions, including `dd`, `cc`, `yy`, `dw`, `cw`, `d$`, `c0`
+- Text objects: `iw`, `aw` for `diw`, `ciw`, `yiw`, `daw`, `caw`, `yaw`
+- Edit: `x`, `s`, `S`, `D`, `r`, `.`, `u`, `Ctrl-r`
+- Paste: `p`, `P`
+- Search: `/pattern`, `?pattern`, `n`, `N`
+- `:w`, `:w filename`, `:q`, `:q!`, `:wq`: write and quit commands
 - `:e path`: open a file in a new buffer
-- `:bnew`: create an empty buffer
-- `:bn` / `:bp`: next / previous buffer
+- `:bnew`, `:bn`, `:bp`, `:bfirst`, `:blast`, `:buffer N`, `:ls`, `:bd`, `:bd!`: buffer commands
+- `:set number`, `:set nonumber`, `:set relativenumber`, `:set norelativenumber`
