@@ -37,6 +37,14 @@ static bool is_word_byte(char c) {
     return isalnum((unsigned char)c) || c == '_';
 }
 
+static bool is_space_byte(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static bool is_punct_word_byte(char c) {
+    return c != 0 && !is_space_byte(c) && !is_word_byte(c);
+}
+
 static void editor_move_line_end(Editor *e) {
     e->cursor = line_end_at(&e->text, e->cursor);
     if (e->mode != MODE_INSERT) e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
@@ -62,8 +70,12 @@ static size_t word_forward_pos(const Text *t, size_t cursor, int count) {
     size_t p = cursor;
     for (int n = 0; n < count; n++) {
         if (p < t->len) p++;
-        while (p < t->len && is_word_byte(t->data[p])) p++;
-        while (p < t->len && !is_word_byte(t->data[p])) p++;
+        if (p > 0 && is_word_byte(t->data[p - 1])) {
+            while (p < t->len && is_word_byte(t->data[p])) p++;
+        } else if (p > 0 && is_punct_word_byte(t->data[p - 1])) {
+            while (p < t->len && is_punct_word_byte(t->data[p])) p++;
+        }
+        while (p < t->len && is_space_byte(t->data[p])) p++;
     }
     return clamp_cursor_for_normal(t, p);
 }
@@ -73,8 +85,12 @@ static size_t word_back_pos(const Text *t, size_t cursor, int count) {
     for (int n = 0; n < count; n++) {
         if (p == 0) break;
         p--;
-        while (p > 0 && !is_word_byte(t->data[p])) p--;
-        while (p > 0 && is_word_byte(t->data[p - 1])) p--;
+        while (p > 0 && is_space_byte(t->data[p])) p--;
+        if (is_word_byte(t->data[p])) {
+            while (p > 0 && is_word_byte(t->data[p - 1])) p--;
+        } else if (is_punct_word_byte(t->data[p])) {
+            while (p > 0 && is_punct_word_byte(t->data[p - 1])) p--;
+        }
     }
     return p;
 }
@@ -83,8 +99,12 @@ static size_t word_end_pos(const Text *t, size_t cursor, int count) {
     size_t p = cursor;
     for (int n = 0; n < count; n++) {
         if (p < t->len) p++;
-        while (p < t->len && !is_word_byte(t->data[p])) p++;
-        while (p + 1 < t->len && is_word_byte(t->data[p + 1])) p++;
+        while (p < t->len && is_space_byte(t->data[p])) p++;
+        if (p < t->len && is_word_byte(t->data[p])) {
+            while (p + 1 < t->len && is_word_byte(t->data[p + 1])) p++;
+        } else if (p < t->len && is_punct_word_byte(t->data[p])) {
+            while (p + 1 < t->len && is_punct_word_byte(t->data[p + 1])) p++;
+        }
     }
     return clamp_cursor_for_normal(t, p);
 }
@@ -619,6 +639,7 @@ static void editor_yank_range(Editor *e, size_t start, size_t end) {
     text_set(&e->yank, e->text.data + start, end - start);
     e->has_yank = true;
     e->yank_linewise = false;
+    e->yank_blockwise = false;
 }
 
 static void editor_yank_line(Editor *e) {
@@ -629,8 +650,99 @@ static void editor_yank_line(Editor *e) {
     e->yank_linewise = true;
 }
 
+static size_t line_col_to_pos(const Text *t, int line, int col) {
+    size_t start = line_start_by_number(t, line);
+    size_t end = line_end_at(t, start);
+    size_t pos = start + (size_t)(col < 0 ? 0 : col);
+    return pos > end ? end : pos;
+}
+
+static void visual_block_bounds(const Editor *e, int *line0, int *line1, int *col0, int *col1) {
+    int a_line = byte_line(&e->text, e->visual_anchor);
+    int b_line = byte_line(&e->text, e->cursor);
+    int a_col = byte_col(&e->text, e->visual_anchor);
+    int b_col = byte_col(&e->text, e->cursor);
+    if (a_line > b_line) {
+        int t = a_line;
+        a_line = b_line;
+        b_line = t;
+    }
+    if (a_col > b_col) {
+        int t = a_col;
+        a_col = b_col;
+        b_col = t;
+    }
+    *line0 = a_line;
+    *line1 = b_line;
+    *col0 = a_col;
+    *col1 = b_col;
+}
+
+static void editor_yank_visual_block(Editor *e) {
+    int line0, line1, col0, col1;
+    visual_block_bounds(e, &line0, &line1, &col0, &col1);
+    Text out;
+    text_init(&out);
+    out.len = 0;
+    out.data[0] = 0;
+    for (int line = line0; line <= line1; line++) {
+        size_t start = line_col_to_pos(&e->text, line, col0);
+        size_t end = line_col_to_pos(&e->text, line, col1 + 1);
+        if (end > start) text_insert(&out, out.len, e->text.data + start, end - start);
+        if (line != line1) text_insert(&out, out.len, "\n", 1);
+    }
+    text_set(&e->yank, out.data, out.len);
+    free(out.data);
+    e->has_yank = true;
+    e->yank_linewise = false;
+    e->yank_blockwise = true;
+}
+
+static void editor_delete_visual_block(Editor *e) {
+    int line0, line1, col0, col1;
+    visual_block_bounds(e, &line0, &line1, &col0, &col1);
+    editor_yank_visual_block(e);
+    editor_begin_change(e);
+    for (int line = line1; line >= line0; line--) {
+        size_t start = line_col_to_pos(&e->text, line, col0);
+        size_t end = line_col_to_pos(&e->text, line, col1 + 1);
+        if (end > start) text_delete(&e->text, start, end - start);
+    }
+    e->cursor = clamp_cursor_for_normal(&e->text, line_col_to_pos(&e->text, line0, col0));
+    e->desired_col = byte_col(&e->text, e->cursor);
+    e->mode = MODE_NORMAL;
+    e->visual_block = false;
+    editor_reparse(e);
+}
+
+static void editor_paste_block(Editor *e, bool before) {
+    if (!e->has_yank || !e->yank_blockwise || e->yank.len == 0) return;
+    int start_line = byte_line(&e->text, e->cursor);
+    int start_col = byte_col(&e->text, e->cursor) + (before ? 0 : 1);
+    editor_begin_change(e);
+    size_t seg_start = 0;
+    int line_delta = 0;
+    while (seg_start <= e->yank.len) {
+        size_t seg_end = seg_start;
+        while (seg_end < e->yank.len && e->yank.data[seg_end] != '\n') seg_end++;
+        int line = start_line + line_delta;
+        while (line >= line_count(&e->text)) text_insert(&e->text, e->text.len, "\n", 1);
+        size_t pos = line_col_to_pos(&e->text, line, start_col);
+        text_insert(&e->text, pos, e->yank.data + seg_start, seg_end - seg_start);
+        if (seg_end >= e->yank.len) break;
+        seg_start = seg_end + 1;
+        line_delta++;
+    }
+    e->cursor = clamp_cursor_for_normal(&e->text, line_col_to_pos(&e->text, start_line, start_col));
+    editor_reparse(e);
+}
+
 static void editor_paste(Editor *e, bool before) {
     if (!e->has_yank || e->yank.len == 0) return;
+    if (e->yank_blockwise) {
+        editor_paste_block(e, before);
+        return;
+    }
     editor_begin_change(e);
     size_t pos = e->cursor;
     if (e->yank_linewise) {
@@ -828,7 +940,13 @@ static void editor_finish_operator(Editor *e, char motion, int motion_count, boo
     } else if (!editor_motion(e, motion, count, shift, rows, &pos, &linewise)) {
         return;
     }
-    if (motion == 'w' && !linewise && pos > e->cursor) pos--;
+    if (motion == 'w' && !linewise) {
+        if (e->operator_pending == 'c') {
+            pos = word_end_pos(&e->text, e->cursor, count);
+        } else if (pos > e->cursor) {
+            pos--;
+        }
+    }
     if (e->operator_pending == 'd') {
         editor_delete_range(e, e->cursor, pos, linewise);
         snprintf(e->last_change, sizeof(e->last_change), "%c%c", 'd', motion);
@@ -879,13 +997,107 @@ static bool editor_word_object(Editor *e, bool around, size_t *a, size_t *b) {
     return true;
 }
 
+static bool delimiter_pair(char object, char *open, char *close, bool *quote) {
+    *quote = false;
+    switch (object) {
+    case '(':
+    case ')': *open = '('; *close = ')'; return true;
+    case '[':
+    case ']': *open = '['; *close = ']'; return true;
+    case '{':
+    case '}': *open = '{'; *close = '}'; return true;
+    case '<':
+    case '>': *open = '<'; *close = '>'; return true;
+    case '"':
+    case '\'':
+    case '`': *open = object; *close = object; *quote = true; return true;
+    default: return false;
+    }
+}
+
+static bool editor_pair_object(Editor *e, bool around, char object, size_t *a, size_t *b) {
+    char open = 0, close = 0;
+    bool quote = false;
+    if (!delimiter_pair(object, &open, &close, &quote) || e->text.len == 0) return false;
+    size_t cursor = e->cursor < e->text.len ? e->cursor : e->text.len - 1;
+    size_t left = SIZE_MAX;
+    size_t right = SIZE_MAX;
+    if (quote) {
+        size_t line_start = line_start_at(&e->text, cursor);
+        size_t line_end = line_end_at(&e->text, cursor);
+        for (size_t i = cursor + 1; i-- > line_start;) {
+            if (e->text.data[i] == open) {
+                left = i;
+                break;
+            }
+            if (i == 0) break;
+        }
+        for (size_t i = cursor + (left == cursor ? 1 : 0); i < line_end; i++) {
+            if (i != left && e->text.data[i] == close) {
+                right = i;
+                break;
+            }
+        }
+    } else {
+        int depth = 0;
+        for (size_t i = cursor + 1; i-- > 0;) {
+            char c = e->text.data[i];
+            if (c == close) depth++;
+            else if (c == open) {
+                if (depth == 0) {
+                    left = i;
+                    break;
+                }
+                depth--;
+            }
+            if (i == 0) break;
+        }
+        depth = 0;
+        size_t start = left != SIZE_MAX ? left : cursor;
+        for (size_t i = start; i < e->text.len; i++) {
+            char c = e->text.data[i];
+            if (c == open) depth++;
+            else if (c == close) {
+                depth--;
+                if (depth == 0) {
+                    right = i;
+                    break;
+                }
+            }
+        }
+    }
+    if (left == SIZE_MAX || right == SIZE_MAX || left >= right) return false;
+    if (around) {
+        *a = left;
+        *b = right;
+    } else {
+        *a = left + 1;
+        *b = right > 0 ? right - 1 : right;
+    }
+    return *a <= *b || !around;
+}
+
 static void editor_finish_text_object(Editor *e, bool around, char object) {
-    if (object != 'w' || !e->operator_pending) return;
+    if (!e->operator_pending) return;
     size_t a = 0, b = 0;
-    if (!editor_word_object(e, around, &a, &b)) return;
-    if (e->operator_pending == 'd') editor_delete_range(e, a, b, false);
-    else if (e->operator_pending == 'c') editor_change_range(e, a, b, false);
-    else if (e->operator_pending == 'y') editor_yank_range(e, a, b + 1);
+    if (object == 'w') {
+        if (!editor_word_object(e, around, &a, &b)) return;
+    } else {
+        if (!editor_pair_object(e, around, object, &a, &b)) return;
+    }
+    if (e->operator_pending == 'd') {
+        if (a <= b) editor_delete_range(e, a, b, false);
+    } else if (e->operator_pending == 'c') {
+        if (a <= b) editor_change_range(e, a, b, false);
+        else {
+            e->cursor = clamp_cursor_for_normal(&e->text, a);
+            e->mode = MODE_INSERT;
+            e->suppress_next_char = true;
+        }
+    } else if (e->operator_pending == 'y') {
+        if (a <= b) editor_yank_range(e, a, b + 1);
+        e->mode = MODE_NORMAL;
+    }
     e->operator_pending = 0;
     e->operator_count = 0;
     e->count = 0;
@@ -925,6 +1137,8 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->count = 0;
         e->operator_count = 0;
         e->waiting_char = 0;
+        e->visual_block = false;
+        e->visual_line = false;
         e->command_len = 0;
         e->command[0] = 0;
         e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
@@ -958,12 +1172,14 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         }
         if (c == 'i' || c == 'a') {
             e->waiting_char = c;
+            e->suppress_next_char = true;
             return;
         }
         if (c == 'f' || c == 'F' || c == 't' || c == 'T') {
             e->waiting_char = c;
             e->operator_count = e->operator_count > 0 ? e->operator_count : 1;
             e->count = count;
+            e->suppress_next_char = true;
             return;
         }
         editor_finish_operator(e, c, count, shift, rows);
@@ -983,6 +1199,17 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->top_line -= rows;
         if (e->top_line < 0) e->top_line = 0;
         editor_move_vertical(e, -rows);
+    } else if ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_V) {
+        if (e->mode == MODE_VISUAL && e->visual_block) {
+            e->mode = MODE_NORMAL;
+            e->visual_block = false;
+        } else {
+            e->mode = MODE_VISUAL;
+            e->visual_line = false;
+            e->visual_block = true;
+            e->visual_anchor = e->cursor;
+        }
+        e->pending = 0;
     } else if (c == 'u') {
         editor_undo(e);
     } else if (c == 'i' || c == 'I') {
@@ -997,10 +1224,11 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->pending = 0;
         e->suppress_next_char = true;
     } else if (c == 'v') {
-        if (e->mode == MODE_VISUAL && !e->visual_line) e->mode = MODE_NORMAL;
+        if (e->mode == MODE_VISUAL && !e->visual_line && !e->visual_block) e->mode = MODE_NORMAL;
         else {
             e->mode = MODE_VISUAL;
             e->visual_line = false;
+            e->visual_block = false;
             e->visual_anchor = e->cursor;
         }
         e->pending = 0;
@@ -1009,18 +1237,21 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         else {
             e->mode = MODE_VISUAL;
             e->visual_line = true;
+            e->visual_block = false;
             e->visual_anchor = line_start_at(&e->text, e->cursor);
         }
         e->pending = 0;
     } else if (c == '.') {
         editor_repeat_change(e);
     } else if (c == 'x') {
-        if (e->mode == MODE_VISUAL) editor_delete_selection(e);
+        if (e->mode == MODE_VISUAL && e->visual_block) editor_delete_visual_block(e);
+        else if (e->mode == MODE_VISUAL) editor_delete_selection(e);
         else editor_delete_chars(e, count);
         snprintf(e->last_change, sizeof(e->last_change), "x");
         e->pending = 0;
     } else if (c == 'X') {
-        if (e->mode == MODE_VISUAL) editor_delete_selection(e);
+        if (e->mode == MODE_VISUAL && e->visual_block) editor_delete_visual_block(e);
+        else if (e->mode == MODE_VISUAL) editor_delete_selection(e);
         else editor_delete_left_chars(e, count);
         snprintf(e->last_change, sizeof(e->last_change), "X");
         e->pending = 0;
@@ -1059,26 +1290,35 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         editor_yank_line(e);
     } else if (c == 'd' || c == 'c' || c == 'y') {
         if (e->mode == MODE_VISUAL) {
-            if (c == 'd') editor_delete_selection(e);
+            if (c == 'd') {
+                if (e->visual_block) editor_delete_visual_block(e);
+                else editor_delete_selection(e);
+            }
             else if (c == 'c') {
-                editor_delete_selection(e);
+                if (e->visual_block) editor_delete_visual_block(e);
+                else editor_delete_selection(e);
                 e->mode = MODE_INSERT;
                 e->suppress_next_char = true;
             } else {
-                size_t a = e->visual_anchor, b = e->cursor;
-                if (a > b) {
-                    size_t t = a;
-                    a = b;
-                    b = t;
+                if (e->visual_block) {
+                    editor_yank_visual_block(e);
+                } else {
+                    size_t a = e->visual_anchor, b = e->cursor;
+                    if (a > b) {
+                        size_t t = a;
+                        a = b;
+                        b = t;
+                    }
+                    if (e->visual_line) {
+                        a = line_start_at(&e->text, a);
+                        b = line_end_at(&e->text, b);
+                        if (b < e->text.len) b++;
+                    } else if (b < e->text.len) b++;
+                    editor_yank_range(e, a, b);
+                    e->yank_linewise = e->visual_line;
                 }
-                if (e->visual_line) {
-                    a = line_start_at(&e->text, a);
-                    b = line_end_at(&e->text, b);
-                    if (b < e->text.len) b++;
-                } else if (b < e->text.len) b++;
-                editor_yank_range(e, a, b);
-                e->yank_linewise = e->visual_line;
                 e->mode = MODE_NORMAL;
+                e->visual_block = false;
             }
         } else {
             e->operator_pending = c;
@@ -1091,9 +1331,11 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->pending = 0;
     } else if (c == 'r') {
         e->waiting_char = 'r';
+        e->suppress_next_char = true;
     } else if (c == 'f' || c == 'F' || c == 't' || c == 'T') {
         e->waiting_char = c;
         e->operator_count = count;
+        e->suppress_next_char = true;
     } else if (c == ';' || c == ',') {
         if (e->last_find_cmd && e->last_find_char) {
             char cmd = e->last_find_cmd;

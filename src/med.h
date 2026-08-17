@@ -125,6 +125,7 @@ typedef struct {
     char last_find_char;
     char last_find_cmd;
     bool visual_line;
+    bool visual_block;
     bool suppress_next_char;
     char command[256];
     size_t command_len;
@@ -140,6 +141,7 @@ typedef struct {
     Text yank;
     bool has_yank;
     bool yank_linewise;
+    bool yank_blockwise;
     SnapshotStack undo;
     SnapshotStack redo;
     CursorTrail cursor_trail[CURSOR_TRAIL_MAX];

@@ -455,6 +455,7 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
     glfwGetFramebufferSize(window, &fbw, &fbh);
     int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - app->vk.font.line_h) / app->vk.font.line_h) : 1;
     if (rows < 1) rows = 1;
+    if (e->waiting_char && key != GLFW_KEY_ESCAPE) return;
     if (e->mode == MODE_COMMAND) {
         if (key == GLFW_KEY_ESCAPE) {
             e->mode = MODE_NORMAL;
@@ -541,6 +542,25 @@ static void draw_text(DrawList *dl, FontAtlas *font, const char *s, float x, flo
 
 static bool in_selection(const Editor *e, size_t pos) {
     if (e->mode != MODE_VISUAL) return false;
+    if (e->visual_block) {
+        int a_line = byte_line(&e->text, e->visual_anchor);
+        int b_line = byte_line(&e->text, e->cursor);
+        int a_col = byte_col(&e->text, e->visual_anchor);
+        int b_col = byte_col(&e->text, e->cursor);
+        int line = byte_line(&e->text, pos);
+        int col = byte_col(&e->text, pos);
+        if (a_line > b_line) {
+            int t = a_line;
+            a_line = b_line;
+            b_line = t;
+        }
+        if (a_col > b_col) {
+            int t = a_col;
+            a_col = b_col;
+            b_col = t;
+        }
+        return line >= a_line && line <= b_line && col >= a_col && col <= b_col;
+    }
     size_t a = e->visual_anchor, b = e->cursor;
     if (a > b) {
         size_t t = a;

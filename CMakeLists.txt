@@ -70,3 +70,31 @@ target_compile_definitions(med PRIVATE
   MED_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}"
   MED_DEFAULT_FONT="/usr/share/fonts/myfonts/CaskaydiaCove/CaskaydiaCoveNerdFontMono-Regular.ttf"
 )
+
+add_executable(med_editor_tests
+  src/editor_tests.c
+  src/common.c
+  src/editor.c
+)
+
+target_include_directories(med_editor_tests PRIVATE
+  ${GLFW_INCLUDE_DIRS}
+  ${FREETYPE_INCLUDE_DIRS}
+  ${TREE_SITTER_INCLUDE_DIRS}
+)
+
+target_compile_options(med_editor_tests PRIVATE
+  ${GLFW_CFLAGS_OTHER}
+  ${FREETYPE_CFLAGS_OTHER}
+  ${TREE_SITTER_CFLAGS_OTHER}
+  -Wall -Wextra -Wpedantic
+)
+
+target_link_libraries(med_editor_tests PRIVATE
+  ${GLFW_LIBRARIES}
+  ${TREE_SITTER_LIBRARIES}
+  ${TREE_SITTER_C_LIB}
+)
+
+enable_testing()
+add_test(NAME med_editor_tests COMMAND med_editor_tests)
