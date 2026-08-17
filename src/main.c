@@ -1333,6 +1333,7 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
             app->editor.command[--app->editor.command_len] = 0;
             return;
         }
+        return;
     }
     editor_key(&app->editor, key, mods);
 }
@@ -1416,7 +1417,8 @@ static void build_draw_list(App *owner, DrawList *dl) {
     float h = (float)vk->extent.height;
     float line_h = vk->font.line_h;
     float cell = vk->font.cell_w;
-    int rows = (int)(h / line_h);
+    int rows = (int)((h - line_h) / line_h);
+    if (rows < 1) rows = 1;
     int gutter_digits = (int)log10((double)(line_count(&e->text) + 1)) + 2;
     float gutter_w = (float)gutter_digits * cell + 18.0f;
     int cols = (int)((w - gutter_w - 12.0f) / cell);
