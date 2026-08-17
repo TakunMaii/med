@@ -1,4 +1,5 @@
 #include "med.h"
+#include "keymap.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -801,6 +802,20 @@ static void test_text_line_index_updates(void) {
     text_free(&t);
 }
 
+static void test_keymap_prefers_more_specific_binding(void) {
+    KeymapBinding bindings[] = {
+        {.key = GLFW_KEY_ESCAPE, .priority = 1},
+        {.key = GLFW_KEY_ESCAPE, .mode_exact = true, .mode = MODE_INSERT, .priority = 1},
+    };
+    KeymapProbe probe = {
+        .key = GLFW_KEY_ESCAPE,
+        .mods = 0,
+        .ch = 0,
+        .ctx = {.mode = MODE_INSERT},
+    };
+    assert(keymap_resolve(bindings, 2, &probe, NULL) == 1);
+}
+
 int main(void) {
     test_dw_keeps_next_word();
     test_dw_stops_before_punctuation_word();
@@ -852,5 +867,6 @@ int main(void) {
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();
+    test_keymap_prefers_more_specific_binding();
     return 0;
 }
