@@ -1,0 +1,10 @@
+build/
+.cache/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.spv
+compile_commands.json
