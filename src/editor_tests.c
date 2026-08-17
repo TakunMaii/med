@@ -271,6 +271,77 @@ static void test_ls_status_is_multiline(void) {
     assert(strchr(app.editor.status, '\n') != NULL);
 }
 
+static void test_delete_inside_big_word(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "foo(bar) baz\n", 2);
+
+    editor_key(&e, GLFW_KEY_D, 0, 20);
+    editor_key(&e, GLFW_KEY_I, 0, 20);
+    editor_handle_waiting_char(&e, 'W');
+
+    assert(strcmp(e.text.data, " baz\n") == 0);
+    assert(strcmp(e.yank.data, "foo(bar)") == 0);
+}
+
+static void test_yank_inside_paragraph(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one\ntwo\n\nthree\n", 5);
+
+    editor_key(&e, GLFW_KEY_Y, 0, 20);
+    editor_key(&e, GLFW_KEY_I, 0, 20);
+    editor_handle_waiting_char(&e, 'p');
+
+    assert(strcmp(e.yank.data, "one\ntwo\n") == 0);
+}
+
+static void test_toggle_case_count(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "aBcD\n", 0);
+
+    editor_key(&e, GLFW_KEY_3, 0, 20);
+    editor_key(&e, GLFW_KEY_GRAVE_ACCENT, GLFW_MOD_SHIFT, 20);
+
+    assert(strcmp(e.text.data, "AbCD\n") == 0);
+    assert(e.cursor == 2);
+}
+
+static void test_marks_exact_and_linewise_jump(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one\n  two\nthree\n", 6);
+
+    editor_key(&e, GLFW_KEY_M, 0, 20);
+    editor_handle_waiting_char(&e, 'a');
+    editor_key(&e, GLFW_KEY_G, GLFW_MOD_SHIFT, 20);
+    editor_key(&e, GLFW_KEY_APOSTROPHE, 0, 20);
+    editor_handle_waiting_char(&e, 'a');
+    assert(e.cursor == 6);
+    editor_key(&e, GLFW_KEY_G, GLFW_MOD_SHIFT, 20);
+    editor_key(&e, GLFW_KEY_GRAVE_ACCENT, 0, 20);
+    editor_handle_waiting_char(&e, 'a');
+    assert(e.cursor == 6);
+}
+
+static void test_named_register_yank_and_paste(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one\ntwo\n", 0);
+
+    editor_key(&e, GLFW_KEY_APOSTROPHE, GLFW_MOD_SHIFT, 20);
+    editor_handle_waiting_char(&e, 'a');
+    editor_key(&e, GLFW_KEY_Y, 0, 20);
+    editor_key(&e, GLFW_KEY_Y, 0, 20);
+    editor_key(&e, GLFW_KEY_G, GLFW_MOD_SHIFT, 20);
+    editor_key(&e, GLFW_KEY_APOSTROPHE, GLFW_MOD_SHIFT, 20);
+    editor_handle_waiting_char(&e, 'a');
+    editor_key(&e, GLFW_KEY_P, 0, 20);
+
+    assert(strcmp(e.text.data, "one\ntwo\none\n") == 0);
+}
+
 static void test_visual_block_delete(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -355,6 +426,11 @@ int main(void) {
     test_visual_o_swaps_selection_endpoints();
     test_gv_restores_last_visual_selection();
     test_ls_status_is_multiline();
+    test_delete_inside_big_word();
+    test_yank_inside_paragraph();
+    test_toggle_case_count();
+    test_marks_exact_and_linewise_jump();
+    test_named_register_yank_and_paste();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();

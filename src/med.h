@@ -199,10 +199,17 @@ typedef struct {
     size_t last_visual_cursor;
     bool last_visual_line;
     bool last_visual_block;
+    char pending_register;
+    bool marks_set[26];
+    size_t marks[26];
     Text yank;
     bool has_yank;
     bool yank_linewise;
     bool yank_blockwise;
+    Text registers[26];
+    bool has_register[26];
+    bool register_linewise[26];
+    bool register_blockwise[26];
     SnapshotStack undo;
     SnapshotStack redo;
     CursorTrail cursor_trail[CURSOR_TRAIL_MAX];

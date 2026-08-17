@@ -45,9 +45,11 @@ ctest --test-dir build --output-on-failure
 - `Esc`: return to normal mode; insert-mode edits are grouped into a single undo step
 - Visual: `v` for character selection, `V` for line selection, `Ctrl-v` for block selection, `o` to swap selection endpoints, `gv` to restore the previous selection
 - Operators: `d`, `c`, `y` with motions, including `dd`, `cc`, `yy`, `dw`, `cw`, `d$`, `c0`
-- Text objects: `iw`, `aw` for `diw`, `ciw`, `yiw`, `daw`, `caw`, `yaw`
-- Edit: `x`, `s`, `S`, `D`, `r`, `.`, `u`, `Ctrl-r`; `.` repeats simple edits and the last inserted text
+- Text objects: `iw`, `aw`, `iW`, `aW`, `ip`, `ap`, plus delimiter objects such as `i(`, `a(`, `i"`, `a"`
+- Edit: `x`, `s`, `S`, `D`, `r`, `~`, `.`, `u`, `Ctrl-r`; `.` repeats simple edits and the last inserted text
 - Paste: `p`, `P`
+- Registers: named register prefixes such as `"ayy`, `"ap`
+- Marks: `ma`, `'a`, and `` `a`` for lowercase file-local marks
 - Search: `/pattern`, `?pattern`, `n`, `N`
 - Command line: defaults to one line, wraps/expands up to eight lines for long input or output; `Shift-Enter` or `Ctrl-Enter` inserts a command-line newline
 - `:w`, `:w filename`, `:q`, `:q!`, `:wq`: write and quit commands
