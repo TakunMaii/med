@@ -57,6 +57,16 @@ void text_init(Text *t) {
     t->len = 0;
     t->data = xmalloc(t->cap);
     t->data[0] = 0;
+    t->line_cap = 128;
+    t->line_count = 1;
+    t->line_starts = xmalloc(t->line_cap * sizeof(*t->line_starts));
+    t->line_starts[0] = 0;
+}
+
+void text_free(Text *t) {
+    free(t->data);
+    free(t->line_starts);
+    memset(t, 0, sizeof(*t));
 }
 
 void text_reserve(Text *t, size_t cap) {
@@ -66,11 +76,81 @@ void text_reserve(Text *t, size_t cap) {
     if (!t->data) die("out of memory");
 }
 
+static void text_reserve_lines(Text *t, size_t cap) {
+    if (cap <= t->line_cap) return;
+    while (t->line_cap < cap) t->line_cap *= 2;
+    t->line_starts = realloc(t->line_starts, t->line_cap * sizeof(*t->line_starts));
+    if (!t->line_starts) die("out of memory");
+}
+
+static void text_rebuild_lines(Text *t) {
+    size_t lines = 1;
+    for (size_t i = 0; i < t->len; i++) {
+        if (t->data[i] == '\n') lines++;
+    }
+    text_reserve_lines(t, lines);
+    t->line_count = 1;
+    t->line_starts[0] = 0;
+    for (size_t i = 0; i < t->len; i++) {
+        if (t->data[i] == '\n') t->line_starts[t->line_count++] = i + 1;
+    }
+}
+
+static size_t text_line_index_at_pos(const Text *t, size_t pos) {
+    if (pos > t->len) pos = t->len;
+    size_t lo = 0, hi = t->line_count;
+    while (lo + 1 < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (t->line_starts[mid] <= pos) lo = mid;
+        else hi = mid;
+    }
+    return lo;
+}
+
+static void text_lines_inserted(Text *t, size_t pos, const char *s, size_t n) {
+    size_t newlines = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '\n') newlines++;
+    }
+    if (newlines == 0) {
+        size_t line = text_line_index_at_pos(t, pos);
+        for (size_t i = line + 1; i < t->line_count; i++) t->line_starts[i] += n;
+        return;
+    }
+    size_t line = text_line_index_at_pos(t, pos);
+    text_reserve_lines(t, t->line_count + newlines);
+    memmove(t->line_starts + line + 1 + newlines, t->line_starts + line + 1,
+            (t->line_count - line - 1) * sizeof(*t->line_starts));
+    size_t out = line + 1;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '\n') t->line_starts[out++] = pos + i + 1;
+    }
+    t->line_count += newlines;
+    for (size_t i = line + 1 + newlines; i < t->line_count; i++) t->line_starts[i] += n;
+}
+
+static void text_lines_deleted(Text *t, size_t pos, size_t n) {
+    size_t end = pos + n;
+    size_t first = text_line_index_at_pos(t, pos);
+    size_t remove_first = first + 1;
+    while (remove_first < t->line_count && t->line_starts[remove_first] <= pos) remove_first++;
+    size_t remove_end = remove_first;
+    while (remove_end < t->line_count && t->line_starts[remove_end] <= end) remove_end++;
+    size_t removed = remove_end - remove_first;
+    if (removed) {
+        memmove(t->line_starts + remove_first, t->line_starts + remove_end,
+                (t->line_count - remove_end) * sizeof(*t->line_starts));
+        t->line_count -= removed;
+    }
+    for (size_t i = remove_first; i < t->line_count; i++) t->line_starts[i] -= n;
+}
+
 void text_set(Text *t, const char *s, size_t n) {
     text_reserve(t, n + 1);
     memcpy(t->data, s, n);
     t->data[n] = 0;
     t->len = n;
+    text_rebuild_lines(t);
 }
 
 void text_insert(Text *t, size_t pos, const char *s, size_t n) {
@@ -78,12 +158,14 @@ void text_insert(Text *t, size_t pos, const char *s, size_t n) {
     text_reserve(t, t->len + n + 1);
     memmove(t->data + pos + n, t->data + pos, t->len - pos + 1);
     memcpy(t->data + pos, s, n);
+    text_lines_inserted(t, pos, s, n);
     t->len += n;
 }
 
 void text_delete(Text *t, size_t pos, size_t n) {
     if (pos >= t->len) return;
     if (pos + n > t->len) n = t->len - pos;
+    text_lines_deleted(t, pos, n);
     memmove(t->data + pos, t->data + pos + n, t->len - pos - n + 1);
     t->len -= n;
 }
@@ -101,6 +183,7 @@ void snapshot_stack_clear(SnapshotStack *st) {
 }
 
 void snapshot_stack_push(SnapshotStack *st, const Text *text, size_t cursor) {
+    if (text->len > MED_UNDO_SNAPSHOT_MAX_BYTES) return;
     if (st->len == st->cap) {
         st->cap = st->cap ? st->cap * 2 : 64;
         st->items = realloc(st->items, st->cap * sizeof(*st->items));
@@ -122,8 +205,7 @@ bool snapshot_stack_pop(SnapshotStack *st, Snapshot *out) {
 
 size_t line_start_at(const Text *t, size_t pos) {
     if (pos > t->len) pos = t->len;
-    while (pos > 0 && t->data[pos - 1] != '\n') pos--;
-    return pos;
+    return t->line_starts[text_line_index_at_pos(t, pos)];
 }
 
 size_t line_end_at(const Text *t, size_t pos) {
@@ -133,12 +215,7 @@ size_t line_end_at(const Text *t, size_t pos) {
 }
 
 int byte_line(const Text *t, size_t pos) {
-    int line = 0;
-    if (pos > t->len) pos = t->len;
-    for (size_t i = 0; i < pos; i++) {
-        if (t->data[i] == '\n') line++;
-    }
-    return line;
+    return (int)text_line_index_at_pos(t, pos);
 }
 
 int byte_col(const Text *t, size_t pos) {
@@ -147,22 +224,12 @@ int byte_col(const Text *t, size_t pos) {
 
 size_t line_start_by_number(const Text *t, int line) {
     if (line <= 0) return 0;
-    int cur = 0;
-    for (size_t i = 0; i < t->len; i++) {
-        if (t->data[i] == '\n') {
-            cur++;
-            if (cur == line) return i + 1;
-        }
-    }
-    return t->len;
+    if ((size_t)line >= t->line_count) return t->len;
+    return t->line_starts[line];
 }
 
 int line_count(const Text *t) {
-    int lines = 1;
-    for (size_t i = 0; i < t->len; i++) {
-        if (t->data[i] == '\n') lines++;
-    }
-    return lines;
+    return (int)t->line_count;
 }
 
 size_t clamp_cursor_for_normal(const Text *t, size_t pos) {

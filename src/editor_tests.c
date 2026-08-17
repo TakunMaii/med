@@ -187,6 +187,28 @@ static void test_tab_new_creates_tab(void) {
     assert(e.tabs[1].views[0].buffer_index != old_buffer);
 }
 
+static void test_text_line_index_updates(void) {
+    Text t;
+    text_init(&t);
+    text_set(&t, "aa\nbbb\nc", 8);
+    assert(line_count(&t) == 3);
+    assert(byte_line(&t, 4) == 1);
+    assert(byte_col(&t, 4) == 1);
+    assert(line_start_by_number(&t, 2) == 7);
+
+    text_insert(&t, 2, "\nxx", 3);
+    assert(strcmp(t.data, "aa\nxx\nbbb\nc") == 0);
+    assert(line_count(&t) == 4);
+    assert(line_start_by_number(&t, 2) == 6);
+    assert(byte_line(&t, 7) == 2);
+
+    text_delete(&t, 2, 3);
+    assert(strcmp(t.data, "aa\nbbb\nc") == 0);
+    assert(line_count(&t) == 3);
+    assert(line_start_by_number(&t, 2) == 7);
+    text_free(&t);
+}
+
 int main(void) {
     test_dw_keeps_next_word();
     test_dw_stops_before_punctuation_word();
@@ -201,5 +223,6 @@ int main(void) {
     test_visual_delete_updates_yank();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
+    test_text_line_index_updates();
     return 0;
 }

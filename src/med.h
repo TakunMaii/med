@@ -40,6 +40,8 @@
 #define EDITOR_MAX_TABS 16
 #define EDITOR_MAX_VIEWS 32
 #define EDITOR_MAX_SPLIT_NODES 63
+#define MED_PARSE_MAX_BYTES (2u * 1024u * 1024u)
+#define MED_UNDO_SNAPSHOT_MAX_BYTES (2u * 1024u * 1024u)
 
 typedef struct {
     float r, g, b, a;
@@ -68,6 +70,9 @@ typedef enum {
 typedef struct {
     char *data;
     size_t len, cap;
+    size_t *line_starts;
+    size_t line_count;
+    size_t line_cap;
 } Text;
 
 typedef struct {
@@ -307,6 +312,7 @@ char *read_file(const char *path, size_t *len_out);
 bool write_file(const char *path, const char *data, size_t len);
 
 void text_init(Text *t);
+void text_free(Text *t);
 void text_reserve(Text *t, size_t cap);
 void text_set(Text *t, const char *s, size_t n);
 void text_insert(Text *t, size_t pos, const char *s, size_t n);

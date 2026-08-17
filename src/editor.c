@@ -263,10 +263,16 @@ static int span_cmp(const void *a, const void *b) {
 }
 
 HighlightKind highlight_at(const Editor *e, size_t byte) {
-    for (size_t i = 0; i < e->highlights.len; i++) {
-        HighlightSpan s = e->highlights.spans[i];
+    size_t lo = 0, hi = e->highlights.len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (e->highlights.spans[mid].start <= byte) lo = mid + 1;
+        else hi = mid;
+    }
+    while (lo > 0) {
+        HighlightSpan s = e->highlights.spans[--lo];
         if (byte >= s.start && byte < s.end) return s.kind;
-        if (s.start > byte) break;
+        if (s.end <= byte) break;
     }
     return HL_NORMAL;
 }
@@ -284,6 +290,13 @@ static HighlightKind capture_kind(const char *name) {
 
 void editor_reparse(Editor *e) {
     highlights_clear(&e->highlights);
+    if (e->text.len > MED_PARSE_MAX_BYTES) {
+        if (e->tree) {
+            ts_tree_delete(e->tree);
+            e->tree = NULL;
+        }
+        return;
+    }
     if (!e->parser || !e->query) return;
     if (e->tree) ts_tree_delete(e->tree);
     e->tree = ts_parser_parse_string(e->parser, NULL, e->text.data, (uint32_t)e->text.len);
@@ -554,7 +567,7 @@ static bool editor_delete_current_buffer(Editor *e, bool force) {
     }
     size_t old = e->current_buffer;
     if (e->tree) ts_tree_delete(e->tree);
-    free(e->text.data);
+    text_free(&e->text);
     free(e->highlights.spans);
     snapshot_stack_clear(&e->undo);
     snapshot_stack_clear(&e->redo);
@@ -996,7 +1009,7 @@ static void editor_yank_visual_block(Editor *e) {
         if (line != line1) text_insert(&out, out.len, "\n", 1);
     }
     text_set(&e->yank, out.data, out.len);
-    free(out.data);
+    text_free(&out);
     e->has_yank = true;
     e->yank_linewise = false;
     e->yank_blockwise = true;
