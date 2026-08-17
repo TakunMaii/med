@@ -131,6 +131,85 @@ static void test_explicit_one_g_goes_to_first_line(void) {
     assert(e.cursor == 0);
 }
 
+static void test_big_word_motions_cross_punctuation(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc(def) ghi\n", 0);
+
+    editor_key(&e, GLFW_KEY_W, GLFW_MOD_SHIFT, 20);
+    assert(e.cursor == 9);
+    editor_key(&e, GLFW_KEY_B, GLFW_MOD_SHIFT, 20);
+    assert(e.cursor == 0);
+    editor_key(&e, GLFW_KEY_E, GLFW_MOD_SHIFT, 20);
+    assert(e.cursor == 7);
+}
+
+static void test_ge_and_g_underscore_motions(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc def   \n", 8);
+
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_E, 0, 20);
+    assert(e.cursor == 6);
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_MINUS, GLFW_MOD_SHIFT, 20);
+    assert(e.cursor == 6);
+}
+
+static void test_pipe_motion_uses_count_as_column(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abcdef\n", 0);
+
+    editor_key(&e, GLFW_KEY_4, 0, 20);
+    editor_key(&e, GLFW_KEY_BACKSLASH, GLFW_MOD_SHIFT, 20);
+    assert(e.cursor == 3);
+}
+
+static void test_operator_with_g_prefix(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one\ntwo\nthree\n", 4);
+
+    editor_key(&e, GLFW_KEY_D, 0, 20);
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+
+    assert(strcmp(e.text.data, "three\n") == 0);
+    assert(e.cursor == 0);
+}
+
+static void test_insert_undo_is_grouped(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\n", 1);
+
+    e.mode = MODE_INSERT;
+    editor_insert_char(&e, 'X');
+    editor_insert_char(&e, 'Y');
+    editor_key(&e, GLFW_KEY_ESCAPE, 0, 20);
+    assert(strcmp(e.text.data, "aXYbc\n") == 0);
+
+    editor_key(&e, GLFW_KEY_U, 0, 20);
+    assert(strcmp(e.text.data, "abc\n") == 0);
+}
+
+static void test_repeat_insert_text(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\n", 1);
+
+    e.mode = MODE_INSERT;
+    editor_insert_char(&e, 'X');
+    editor_insert_char(&e, 'Y');
+    editor_key(&e, GLFW_KEY_ESCAPE, 0, 20);
+    editor_key(&e, GLFW_KEY_L, 0, 20);
+    editor_key(&e, GLFW_KEY_PERIOD, 0, 20);
+
+    assert(strcmp(e.text.data, "aXYXYbc\n") == 0);
+}
+
 static void test_visual_delete_updates_yank(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -144,6 +223,52 @@ static void test_visual_delete_updates_yank(void) {
     assert(e.has_yank);
     assert(!e.yank_linewise);
     assert(strcmp(e.yank.data, "bcd") == 0);
+}
+
+static void test_visual_o_swaps_selection_endpoints(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abcde", 1);
+
+    editor_key(&e, GLFW_KEY_V, 0, 20);
+    editor_key(&e, GLFW_KEY_L, 0, 20);
+    editor_key(&e, GLFW_KEY_L, 0, 20);
+    assert(e.cursor == 3);
+    assert(e.visual_anchor == 1);
+    editor_key(&e, GLFW_KEY_O, 0, 20);
+    assert(e.cursor == 1);
+    assert(e.visual_anchor == 3);
+}
+
+static void test_gv_restores_last_visual_selection(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abcde", 1);
+
+    editor_key(&e, GLFW_KEY_V, 0, 20);
+    editor_key(&e, GLFW_KEY_L, 0, 20);
+    editor_key(&e, GLFW_KEY_L, 0, 20);
+    editor_key(&e, GLFW_KEY_ESCAPE, 0, 20);
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_V, 0, 20);
+
+    assert(e.mode == MODE_VISUAL);
+    assert(e.visual_anchor == 1);
+    assert(e.cursor == 3);
+}
+
+static void test_ls_status_is_multiline(void) {
+    App app;
+    memset(&app, 0, sizeof(app));
+    editor_init(&app.editor, NULL);
+    snprintf(app.editor.command, sizeof(app.editor.command), "bnew");
+    app.editor.command_len = strlen(app.editor.command);
+    app_execute_command(&app);
+    snprintf(app.editor.command, sizeof(app.editor.command), "ls");
+    app.editor.command_len = strlen(app.editor.command);
+    app_execute_command(&app);
+
+    assert(strchr(app.editor.status, '\n') != NULL);
 }
 
 static void test_visual_block_delete(void) {
@@ -219,8 +344,17 @@ int main(void) {
     test_change_inside_parens_with_real_char_sequence();
     test_change_inside_brackets();
     test_explicit_one_g_goes_to_first_line();
+    test_big_word_motions_cross_punctuation();
+    test_ge_and_g_underscore_motions();
+    test_pipe_motion_uses_count_as_column();
+    test_operator_with_g_prefix();
+    test_insert_undo_is_grouped();
+    test_repeat_insert_text();
     test_visual_block_delete();
     test_visual_delete_updates_yank();
+    test_visual_o_swaps_selection_endpoints();
+    test_gv_restores_last_visual_selection();
+    test_ls_status_is_multiline();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();

@@ -529,6 +529,39 @@ static void framebuffer_cb(GLFWwindow *window, int w, int h) {
 
 static float tab_bar_height(const Editor *e, float line_h);
 
+static int wrapped_line_count(const char *s, int cols) {
+    if (cols < 1) cols = 1;
+    int lines = 1;
+    int col = 0;
+    for (size_t i = 0; s[i]; i++) {
+        if (s[i] == '\n') {
+            lines++;
+            col = 0;
+            continue;
+        }
+        col++;
+        if (col >= cols) {
+            lines++;
+            col = 0;
+        }
+    }
+    return lines;
+}
+
+static int command_area_lines_for_width(const Editor *e, float width, float cell) {
+    int cols = cell > 0.0f ? (int)((width - 16.0f) / cell) : 80;
+    if (cols < 1) cols = 1;
+    int lines = 1;
+    if (e->mode == MODE_COMMAND) {
+        lines = wrapped_line_count(e->command, cols - 1);
+    } else if (e->status[0]) {
+        lines = wrapped_line_count(e->status, cols);
+    }
+    if (lines < 1) lines = 1;
+    if (lines > 8) lines = 8;
+    return lines;
+}
+
 static void char_cb(GLFWwindow *window, unsigned int cp) {
     App *app = glfwGetWindowUserPointer(window);
     Editor *e = &app->editor;
@@ -569,7 +602,8 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
     int fbw = 0, fbh = 0;
     glfwGetFramebufferSize(window, &fbw, &fbh);
     float tab_h = tab_bar_height(e, app->vk.font.line_h);
-    int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - tab_h - app->vk.font.line_h * 2.0f) / app->vk.font.line_h) : 1;
+    int command_lines = command_area_lines_for_width(e, (float)fbw, app->vk.font.cell_w);
+    int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - tab_h - app->vk.font.line_h * (1.0f + (float)command_lines)) / app->vk.font.line_h) : 1;
     if (rows < 1) rows = 1;
     if (e->waiting_char && key != GLFW_KEY_ESCAPE) return;
     if (e->mode == MODE_COMMAND) {
@@ -580,6 +614,11 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
             return;
         }
         if (key == GLFW_KEY_ENTER) {
+            if ((mods & (GLFW_MOD_SHIFT | GLFW_MOD_CONTROL)) && e->command_len + 1 < sizeof(e->command)) {
+                e->command[e->command_len++] = '\n';
+                e->command[e->command_len] = 0;
+                return;
+            }
             bool search_cmd = e->command[0] == '/' || e->command[0] == '?';
             app_execute_command(app);
             if (search_cmd) editor_record_cursor_if_moved(e, old_line, old_col, MODE_NORMAL, glfwGetTime());
@@ -655,6 +694,52 @@ static void draw_text(DrawList *dl, FontAtlas *font, const char *s, float x, flo
         draw_glyph(dl, font, s[i], x, y, c);
         x += font->cell_w;
     }
+}
+
+static void draw_wrapped_text(DrawList *dl, FontAtlas *font, const char *s, float x, float y, int cols, int max_lines, Color c) {
+    if (cols < 1) cols = 1;
+    int col = 0;
+    int line = 0;
+    float origin_x = x;
+    for (size_t i = 0; s[i] && line < max_lines; i++) {
+        if (s[i] == '\n') {
+            line++;
+            col = 0;
+            x = origin_x;
+            y += font->line_h;
+            continue;
+        }
+        draw_glyph(dl, font, s[i], x, y, c);
+        x += font->cell_w;
+        col++;
+        if (col >= cols) {
+            line++;
+            col = 0;
+            x = origin_x;
+            y += font->line_h;
+        }
+    }
+}
+
+static void command_cursor_position(const Editor *e, float command_y, float cell, float line_h, int cols, float *x, float *y) {
+    if (cols < 2) cols = 2;
+    int col = 1;
+    int line = 0;
+    for (size_t i = 0; i < e->command_len; i++) {
+        if (e->command[i] == '\n') {
+            line++;
+            col = 0;
+            continue;
+        }
+        col++;
+        if (col >= cols) {
+            line++;
+            col = 0;
+        }
+    }
+    if (line > 7) line = 7;
+    *x = 8.0f + (float)col * cell + 1.0f;
+    *y = command_y + 1.0f + (float)line * line_h + line_h * 0.5f;
 }
 
 static bool in_selection(const Editor *e, size_t pos) {
@@ -861,8 +946,8 @@ static void build_cursor_segments(App *owner, Editor *e, float pane_x, float pan
     float p1x = 0.0f;
     float p1y = 0.0f;
     if (command) {
-        p1x = 8.0f + (float)(e->command_len + 1) * cell + 1.0f;
-        p1y = command_y + 1.0f + line_h * 0.5f;
+        int cols = cell > 0.0f ? (int)(((float)vk->extent.width - 16.0f) / cell) : 80;
+        command_cursor_position(e, command_y, cell, line_h, cols, &p1x, &p1y);
     } else {
         int target_line_i = byte_line(&e->text, e->cursor);
         int target_col_i = byte_col(&e->text, e->cursor);
@@ -988,11 +1073,13 @@ static void build_draw_list(App *owner, DrawList *dl) {
     float line_h = vk->font.line_h;
     draw_rect(dl, 0, 0, w, h, gruvbox.bg);
     draw_tab_bar(owner, dl, w, line_h);
-    float status_y = h - line_h * 2.0f;
-    float command_y = h - line_h;
+    int command_lines = command_area_lines_for_width(e, w, vk->font.cell_w);
+    float command_h = line_h * (float)command_lines;
+    float status_y = h - line_h - command_h;
+    float command_y = h - command_h;
     float tab_h = tab_bar_height(e, line_h);
     float editor_y = tab_h;
-    float editor_h = h - tab_h - line_h * 2.0f;
+    float editor_h = h - tab_h - line_h - command_h;
     if (editor_h < line_h) editor_h = line_h;
     EditorTab *tab = e->tab_count ? &e->tabs[e->current_tab] : NULL;
     PaneRect panes[EDITOR_MAX_VIEWS];
@@ -1010,7 +1097,7 @@ static void build_draw_list(App *owner, DrawList *dl) {
         }
     }
     draw_rect(dl, 0, status_y, w, line_h, gruvbox.gutter_bg);
-    draw_rect(dl, 0, command_y, w, line_h, gruvbox.bg);
+    draw_rect(dl, 0, command_y, w, command_h, gruvbox.bg);
     char pending[64];
     build_pending_keys(e, pending, sizeof(pending));
     char status[768];
@@ -1023,11 +1110,13 @@ static void build_draw_list(App *owner, DrawList *dl) {
              pending);
     draw_text(dl, &vk->font, status, 8.0f, status_y + 1.0f, gruvbox.line_no_current);
     if (e->mode == MODE_COMMAND) {
-        char command[320];
+        char command[EDITOR_COMMAND_MAX + 2];
         snprintf(command, sizeof(command), ":%s", e->command);
-        draw_text(dl, &vk->font, command, 8.0f, command_y + 1.0f, gruvbox.line_no_current);
+        int cols = vk->font.cell_w > 0.0f ? (int)((w - 16.0f) / vk->font.cell_w) : 80;
+        draw_wrapped_text(dl, &vk->font, command, 8.0f, command_y + 1.0f, cols, command_lines, gruvbox.line_no_current);
     } else if (e->status[0]) {
-        draw_text(dl, &vk->font, e->status, 8.0f, command_y + 1.0f, gruvbox.line_no_current);
+        int cols = vk->font.cell_w > 0.0f ? (int)((w - 16.0f) / vk->font.cell_w) : 80;
+        draw_wrapped_text(dl, &vk->font, e->status, 8.0f, command_y + 1.0f, cols, command_lines, gruvbox.line_no_current);
     }
 }
 

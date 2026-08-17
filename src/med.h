@@ -40,6 +40,9 @@
 #define EDITOR_MAX_TABS 16
 #define EDITOR_MAX_VIEWS 32
 #define EDITOR_MAX_SPLIT_NODES 63
+#define EDITOR_COMMAND_MAX 2048
+#define EDITOR_STATUS_MAX 2048
+#define EDITOR_LAST_INSERT_MAX 512
 #define MED_PARSE_MAX_BYTES (2u * 1024u * 1024u)
 #define MED_UNDO_SNAPSHOT_MAX_BYTES (2u * 1024u * 1024u)
 
@@ -177,9 +180,9 @@ typedef struct {
     bool visual_line;
     bool visual_block;
     bool suppress_next_char;
-    char command[256];
+    char command[EDITOR_COMMAND_MAX];
     size_t command_len;
-    char status[512];
+    char status[EDITOR_STATUS_MAX];
     char search[256];
     size_t search_len;
     bool search_backward;
@@ -188,6 +191,14 @@ typedef struct {
     bool relative_number;
     int last_search_dir;
     char last_change[128];
+    char last_insert[EDITOR_LAST_INSERT_MAX];
+    size_t last_insert_len;
+    bool insert_change_active;
+    bool insert_change_had_edit;
+    size_t last_visual_anchor;
+    size_t last_visual_cursor;
+    bool last_visual_line;
+    bool last_visual_block;
     Text yank;
     bool has_yank;
     bool yank_linewise;
