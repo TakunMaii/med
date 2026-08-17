@@ -33,6 +33,10 @@
 #define MAX_VERTICES 262144
 #define CURSOR_TRAIL_MAX 18
 #define CURSOR_TRAIL_SECONDS 0.28
+#define CURSOR_ANIM_STIFFNESS 95.0f
+#define CURSOR_ANIM_DAMPING 0.82f
+#define CURSOR_MAX_TRAIL_CELLS 18.0f
+#define CURSOR_SEGMENT_MAX 4
 
 typedef struct {
     float r, g, b, a;
@@ -93,6 +97,15 @@ typedef struct {
 } CursorTrail;
 
 typedef struct {
+    float x;
+    float y;
+    float velocity_x;
+    float velocity_y;
+    double last_time;
+    bool initialized;
+} AnimatedCursor;
+
+typedef struct {
     Text text;
     char path[512];
     bool dirty;
@@ -146,6 +159,7 @@ typedef struct {
     SnapshotStack redo;
     CursorTrail cursor_trail[CURSOR_TRAIL_MAX];
     size_t cursor_trail_len;
+    AnimatedCursor cursor_anim;
     TSLanguage *c_lang;
     TSParser *parser;
     TSQuery *query;
@@ -198,6 +212,19 @@ typedef struct {
 } SwapImage;
 
 typedef struct {
+    float rect_min[2];
+    float rect_max[2];
+    float p0[2];
+    float p1[2];
+    float half_size[2];
+    float color[4];
+    float softness;
+    float intensity;
+    float mode;
+    float _pad;
+} CursorSegment;
+
+typedef struct {
     GLFWwindow *window;
     VkInstance instance;
     VkSurfaceKHR surface;
@@ -216,6 +243,8 @@ typedef struct {
     VkDescriptorSetLayout desc_layout;
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
+    VkPipelineLayout cursor_pipeline_layout;
+    VkPipeline cursor_pipeline;
     VkDescriptorPool desc_pool;
     VkDescriptorSet desc_set;
     VkCommandPool cmd_pool;
@@ -227,6 +256,8 @@ typedef struct {
     uint32_t frame;
     bool framebuffer_resized;
     FontAtlas font;
+    CursorSegment cursor_segments[CURSOR_SEGMENT_MAX];
+    uint32_t cursor_segment_count;
 } VkApp;
 
 typedef struct {

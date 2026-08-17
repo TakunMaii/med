@@ -416,6 +416,7 @@ void editor_load_buffer(Editor *e, size_t index) {
     e->operator_count = 0;
     e->waiting_char = 0;
     e->cursor_trail_len = 0;
+    e->cursor_anim.initialized = false;
 }
 
 static void editor_add_buffer(Editor *e, const char *path, const char *content, size_t len) {

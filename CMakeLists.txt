@@ -45,10 +45,14 @@ target_link_libraries(med PRIVATE
 set(SHADER_SRC
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/text.vert
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/text.frag
+  ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cursor.vert
+  ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cursor.frag
 )
 set(SHADER_SPV
   ${CMAKE_CURRENT_BINARY_DIR}/text.vert.spv
   ${CMAKE_CURRENT_BINARY_DIR}/text.frag.spv
+  ${CMAKE_CURRENT_BINARY_DIR}/cursor.vert.spv
+  ${CMAKE_CURRENT_BINARY_DIR}/cursor.frag.spv
 )
 
 add_custom_command(
@@ -61,6 +65,18 @@ add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/text.frag.spv
   COMMAND glslc ${CMAKE_CURRENT_SOURCE_DIR}/shaders/text.frag -o ${CMAKE_CURRENT_BINARY_DIR}/text.frag.spv
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/text.frag
+)
+
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cursor.vert.spv
+  COMMAND glslc ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cursor.vert -o ${CMAKE_CURRENT_BINARY_DIR}/cursor.vert.spv
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cursor.vert
+)
+
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cursor.frag.spv
+  COMMAND glslc ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cursor.frag -o ${CMAKE_CURRENT_BINARY_DIR}/cursor.frag.spv
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cursor.frag
 )
 
 add_custom_target(med_shaders DEPENDS ${SHADER_SPV})

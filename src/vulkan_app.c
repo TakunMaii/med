@@ -13,6 +13,20 @@ static Color color_for_highlight(HighlightKind kind) {
     }
 }
 
+typedef struct {
+    float screen_size[2];
+    float rect_min[2];
+    float rect_max[2];
+    float p0[2];
+    float p1[2];
+    float half_size[2];
+    float color[4];
+    float softness;
+    float intensity;
+    float mode;
+    float _pad;
+} CursorPush;
+
 static uint32_t find_memory(VkPhysicalDevice physical, uint32_t type_bits, VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties mem;
     vkGetPhysicalDeviceMemoryProperties(physical, &mem);
@@ -373,6 +387,32 @@ static void create_pipeline(VkApp *app) {
     vkDestroyShaderModule(app->device, fs, NULL);
 }
 
+static void create_cursor_pipeline(VkApp *app) {
+    VkPushConstantRange pc = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(CursorPush)};
+    VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
+    vkCreatePipelineLayout(app->device, &pl, NULL, &app->cursor_pipeline_layout);
+
+    VkShaderModule vs = load_shader(app, "cursor.vert.spv");
+    VkShaderModule fs = load_shader(app, "cursor.frag.spv");
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vs, .pName = "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fs, .pName = "main"},
+    };
+    VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+    VkViewport viewport = {.x = 0, .y = 0, .width = (float)app->extent.width, .height = (float)app->extent.height, .minDepth = 0, .maxDepth = 1};
+    VkRect2D scissor = {.extent = app->extent};
+    VkPipelineViewportStateCreateInfo vp = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .pViewports = &viewport, .scissorCount = 1, .pScissors = &scissor};
+    VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE, .lineWidth = 1.0f};
+    VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+    VkPipelineColorBlendAttachmentState blend = {.blendEnable = VK_TRUE, .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA, .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .colorBlendOp = VK_BLEND_OP_ADD, .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE, .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, .alphaBlendOp = VK_BLEND_OP_ADD, .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+    VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &blend};
+    VkGraphicsPipelineCreateInfo gp = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2, .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp, .pRasterizationState = &rs, .pMultisampleState = &ms, .pColorBlendState = &cb, .layout = app->cursor_pipeline_layout, .renderPass = app->render_pass};
+    if (vkCreateGraphicsPipelines(app->device, VK_NULL_HANDLE, 1, &gp, NULL, &app->cursor_pipeline) != VK_SUCCESS) die("cursor pipeline failed");
+    vkDestroyShaderModule(app->device, vs, NULL);
+    vkDestroyShaderModule(app->device, fs, NULL);
+}
+
 static void create_framebuffers(VkApp *app) {
     for (uint32_t i = 0; i < app->image_count; i++) {
         VkImageView attachments[] = {app->images[i].view};
@@ -503,6 +543,7 @@ void vk_init(App *owner) {
     create_commands_sync(app);
     font_create(app);
     create_pipeline(app);
+    create_cursor_pipeline(app);
     create_framebuffers(app);
     create_descriptors(app);
 }
@@ -611,6 +652,117 @@ static void build_pending_keys(const Editor *e, char *dst, size_t dst_size) {
     }
 }
 
+static float clampf(float v, float lo, float hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+static void update_cursor_animation(Editor *e, float target_x, float target_y, double now) {
+    AnimatedCursor *a = &e->cursor_anim;
+    if (!a->initialized) {
+        a->x = target_x;
+        a->y = target_y;
+        a->velocity_x = 0.0f;
+        a->velocity_y = 0.0f;
+        a->last_time = now;
+        a->initialized = true;
+        return;
+    }
+    float dt = (float)(now - a->last_time);
+    a->last_time = now;
+    dt = clampf(dt, 0.0f, 1.0f / 30.0f);
+    float dx = target_x - a->x;
+    float dy = target_y - a->y;
+    float old_dot = dx * a->velocity_x + dy * a->velocity_y;
+    a->velocity_x += dx * CURSOR_ANIM_STIFFNESS * dt;
+    a->velocity_y += dy * CURSOR_ANIM_STIFFNESS * dt;
+    float damping = powf(CURSOR_ANIM_DAMPING, dt * 60.0f);
+    a->velocity_x *= damping;
+    a->velocity_y *= damping;
+    a->x += a->velocity_x * dt;
+    a->y += a->velocity_y * dt;
+    float new_dx = target_x - a->x;
+    float new_dy = target_y - a->y;
+    float new_dot = new_dx * a->velocity_x + new_dy * a->velocity_y;
+    float dist = sqrtf(new_dx * new_dx + new_dy * new_dy);
+    float speed = sqrtf(a->velocity_x * a->velocity_x + a->velocity_y * a->velocity_y);
+    if ((old_dot > 0.0f && new_dot < 0.0f && dist < 4.0f) || (dist < 0.55f && speed < 24.0f)) {
+        a->x = target_x;
+        a->y = target_y;
+        a->velocity_x = 0.0f;
+        a->velocity_y = 0.0f;
+    }
+}
+
+static void build_cursor_segments(App *owner, float gutter_w, float cell, float line_h, int rows, float editor_h, float command_y) {
+    Editor *e = &owner->editor;
+    VkApp *vk = &owner->vk;
+    vk->cursor_segment_count = 0;
+    bool command = e->mode == MODE_COMMAND;
+    bool insert = e->mode == MODE_INSERT || command;
+    float half_w = insert ? 1.4f : cell * 0.5f;
+    float half_h = insert ? line_h * 0.5f - 2.0f : line_h * 0.5f;
+    if (half_h < 2.0f) half_h = 2.0f;
+    float p1x = 0.0f;
+    float p1y = 0.0f;
+    if (command) {
+        p1x = 8.0f + (float)(e->command_len + 1) * cell + 1.0f;
+        p1y = command_y + 1.0f + line_h * 0.5f;
+    } else {
+        int target_line_i = byte_line(&e->text, e->cursor);
+        int target_col_i = byte_col(&e->text, e->cursor);
+        float target_row = (float)(target_line_i - e->top_line);
+        float target_screen_col = (float)(target_col_i - e->left_col);
+        if (target_row < 0.0f || target_row >= (float)rows || target_screen_col < 0.0f) return;
+        p1x = gutter_w + 8.0f + target_screen_col * cell + (insert ? 1.0f : cell * 0.5f);
+        p1y = target_row * line_h + 2.0f + line_h * 0.5f;
+    }
+    double now = glfwGetTime();
+    update_cursor_animation(e, p1x, p1y, now);
+
+    float dx = p1x - e->cursor_anim.x;
+    float dy = p1y - e->cursor_anim.y;
+    float dist_px = sqrtf(dx * dx + dy * dy);
+    float max_dist_px = CURSOR_MAX_TRAIL_CELLS * fmaxf(cell, line_h);
+    float p0x = e->cursor_anim.x;
+    float p0y = e->cursor_anim.y;
+    if (dist_px > max_dist_px) {
+        float scale = max_dist_px / dist_px;
+        p0x = p1x - dx * scale;
+        p0y = p1y - dy * scale;
+    }
+    float margin = fmaxf(half_w, half_h) + 12.0f;
+    CursorSegment *s = &vk->cursor_segments[vk->cursor_segment_count++];
+    s->rect_min[0] = fminf(p0x, p1x) - margin;
+    s->rect_min[1] = fminf(p0y, p1y) - margin;
+    s->rect_max[0] = fmaxf(p0x, p1x) + margin;
+    s->rect_max[1] = fmaxf(p0y, p1y) + margin;
+    s->rect_min[0] = clampf(s->rect_min[0], 0.0f, (float)vk->extent.width);
+    s->rect_min[1] = clampf(s->rect_min[1], 0.0f, command ? (float)vk->extent.height : editor_h);
+    s->rect_max[0] = clampf(s->rect_max[0], 0.0f, (float)vk->extent.width);
+    s->rect_max[1] = clampf(s->rect_max[1], 0.0f, command ? (float)vk->extent.height : editor_h);
+    if (s->rect_min[0] >= s->rect_max[0] || s->rect_min[1] >= s->rect_max[1]) {
+        vk->cursor_segment_count--;
+        return;
+    }
+    s->p0[0] = p0x;
+    s->p0[1] = p0y;
+    s->p1[0] = p1x;
+    s->p1[1] = p1y;
+    s->half_size[0] = half_w;
+    s->half_size[1] = half_h;
+    Color c = insert ? gruvbox.cursor_insert : gruvbox.cursor;
+    s->color[0] = c.r;
+    s->color[1] = c.g;
+    s->color[2] = c.b;
+    s->color[3] = c.a;
+    s->softness = insert ? 5.0f : 8.0f;
+    s->intensity = dist_px > 0.75f ? 1.0f : 0.0f;
+    s->mode = insert ? 1.0f : 0.0f;
+    s->_pad = 0.0f;
+}
+
 static void build_draw_list(App *owner, DrawList *dl) {
     Editor *e = &owner->editor;
     VkApp *vk = &owner->vk;
@@ -625,6 +777,7 @@ static void build_draw_list(App *owner, DrawList *dl) {
     float gutter_w = (float)gutter_digits * cell + 18.0f;
     int cols = (int)((w - gutter_w - 12.0f) / cell);
     editor_ensure_visible(e, rows, cols);
+    build_cursor_segments(owner, gutter_w, cell, line_h, rows, h - line_h * 2.0f, h - line_h);
     draw_rect(dl, 0, 0, w, h, gruvbox.bg);
     draw_rect(dl, 0, 0, gutter_w, h, gruvbox.gutter_bg);
     int cursor_line = byte_line(&e->text, e->cursor);
@@ -661,44 +814,6 @@ static void build_draw_list(App *owner, DrawList *dl) {
             if (x > w) break;
         }
     }
-    int c_line = cursor_line - e->top_line;
-    int c_col = byte_col(&e->text, e->cursor) - e->left_col;
-    double now = glfwGetTime();
-    size_t keep = 0;
-    for (size_t i = 0; i < e->cursor_trail_len; i++) {
-        CursorTrail tr = e->cursor_trail[i];
-        double age = now - tr.time;
-        if (age >= CURSOR_TRAIL_SECONDS) continue;
-        e->cursor_trail[keep++] = tr;
-        int row = tr.line - e->top_line;
-        int col = tr.col - e->left_col;
-        if (row < 0 || row >= rows || col < 0) continue;
-        float fade = (float)(1.0 - age / CURSOR_TRAIL_SECONDS);
-        fade = fade * fade;
-        float x = gutter_w + 8.0f + col * cell;
-        float y = row * line_h + 2.0f;
-        if (x > w) continue;
-        if (tr.mode == MODE_INSERT) {
-            Color c = gruvbox.cursor_insert;
-            c.a = 0.55f * fade;
-            draw_rect(dl, x, y + 2.0f, 2.0f, line_h - 4.0f, c);
-        } else {
-            Color c = gruvbox.cursor;
-            c.a = 0.32f * fade;
-            draw_rect(dl, x, y, cell, line_h, c);
-        }
-    }
-    e->cursor_trail_len = keep;
-    if (c_line >= 0 && c_line < rows && c_col >= 0) {
-        float x = gutter_w + 8.0f + c_col * cell;
-        float y = c_line * line_h + 2.0f;
-        if (e->mode == MODE_INSERT) draw_rect(dl, x, y + 2.0f, 2.0f, line_h - 4.0f, gruvbox.cursor_insert);
-        else draw_rect(dl, x, y, cell, line_h, gruvbox.cursor);
-        if (e->mode != MODE_INSERT && e->cursor < e->text.len && e->text.data[e->cursor] != '\n') {
-            Color c = color_for_highlight(highlight_at(e, e->cursor));
-            draw_glyph(dl, &vk->font, e->text.data[e->cursor], x, y, c);
-        }
-    }
     float status_y = h - line_h * 2.0f;
     float command_y = h - line_h;
     draw_rect(dl, 0, status_y, w, line_h, gruvbox.gutter_bg);
@@ -723,7 +838,8 @@ static void build_draw_list(App *owner, DrawList *dl) {
     }
 }
 
-static void record_cmd(VkApp *app, uint32_t image, uint32_t vcount) {
+static void record_cmd(App *owner, uint32_t image, uint32_t vcount) {
+    VkApp *app = &owner->vk;
     VkCommandBuffer cmd = app->cmds[image];
     vkResetCommandBuffer(cmd, 0);
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -738,6 +854,26 @@ static void record_cmd(VkApp *app, uint32_t image, uint32_t vcount) {
     float screen[2] = {(float)app->extent.width, (float)app->extent.height};
     vkCmdPushConstants(cmd, app->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(screen), screen);
     vkCmdDraw(cmd, vcount, 1, 0, 0);
+    if (app->cursor_pipeline && app->cursor_segment_count > 0) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, app->cursor_pipeline);
+        for (uint32_t i = 0; i < app->cursor_segment_count; i++) {
+            CursorSegment *s = &app->cursor_segments[i];
+            CursorPush push = {
+                .screen_size = {(float)app->extent.width, (float)app->extent.height},
+                .rect_min = {s->rect_min[0], s->rect_min[1]},
+                .rect_max = {s->rect_max[0], s->rect_max[1]},
+                .p0 = {s->p0[0], s->p0[1]},
+                .p1 = {s->p1[0], s->p1[1]},
+                .half_size = {s->half_size[0], s->half_size[1]},
+                .color = {s->color[0], s->color[1], s->color[2], s->color[3]},
+                .softness = s->softness,
+                .intensity = s->intensity,
+                .mode = s->mode,
+            };
+            vkCmdPushConstants(cmd, app->cursor_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+            vkCmdDraw(cmd, 6, 1, 0, 0);
+        }
+    }
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
 }
@@ -755,7 +891,7 @@ void draw_frame(App *owner) {
     vkMapMemory(app->device, app->vertex_buffers[app->frame].memory, 0, sizeof(Vertex) * dl.count, 0, &mapped);
     memcpy(mapped, dl.vertices, sizeof(Vertex) * dl.count);
     vkUnmapMemory(app->device, app->vertex_buffers[app->frame].memory);
-    record_cmd(app, image, dl.count);
+    record_cmd(owner, image, dl.count);
     free(dl.vertices);
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit = {
