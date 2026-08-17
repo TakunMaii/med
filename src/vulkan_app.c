@@ -453,7 +453,7 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
     bool track_cursor = e->mode != MODE_COMMAND;
     int fbw = 0, fbh = 0;
     glfwGetFramebufferSize(window, &fbw, &fbh);
-    int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - app->vk.font.line_h) / app->vk.font.line_h) : 1;
+    int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - app->vk.font.line_h * 2.0f) / app->vk.font.line_h) : 1;
     if (rows < 1) rows = 1;
     if (e->waiting_char && key != GLFW_KEY_ESCAPE) return;
     if (e->mode == MODE_COMMAND) {
@@ -584,6 +584,33 @@ static bool in_search_match(const Editor *e, size_t pos) {
     return false;
 }
 
+static const char *mode_name(const Editor *e) {
+    if (e->mode == MODE_INSERT) return "-- INSERT --";
+    if (e->mode == MODE_COMMAND) return "COMMAND";
+    if (e->mode == MODE_VISUAL && e->visual_block) return "-- VISUAL BLOCK --";
+    if (e->mode == MODE_VISUAL && e->visual_line) return "-- VISUAL LINE --";
+    if (e->mode == MODE_VISUAL) return "-- VISUAL --";
+    return "NORMAL";
+}
+
+static void append_key(char *dst, size_t dst_size, char key) {
+    size_t len = strlen(dst);
+    if (len + 2 >= dst_size) return;
+    dst[len] = key;
+    dst[len + 1] = 0;
+}
+
+static void build_pending_keys(const Editor *e, char *dst, size_t dst_size) {
+    dst[0] = 0;
+    if (e->operator_pending) append_key(dst, dst_size, e->operator_pending);
+    if (e->waiting_char == 'i' || e->waiting_char == 'a') append_key(dst, dst_size, e->waiting_char);
+    else if (e->waiting_char) append_key(dst, dst_size, e->waiting_char);
+    if (e->pending && !e->operator_pending && !e->waiting_char) append_key(dst, dst_size, e->pending);
+    if (e->count > 0 && !e->operator_pending && !e->pending && !e->waiting_char) {
+        snprintf(dst, dst_size, "%d", e->count);
+    }
+}
+
 static void build_draw_list(App *owner, DrawList *dl) {
     Editor *e = &owner->editor;
     VkApp *vk = &owner->vk;
@@ -592,7 +619,7 @@ static void build_draw_list(App *owner, DrawList *dl) {
     float h = (float)vk->extent.height;
     float line_h = vk->font.line_h;
     float cell = vk->font.cell_w;
-    int rows = (int)((h - line_h) / line_h);
+    int rows = (int)((h - line_h * 2.0f) / line_h);
     if (rows < 1) rows = 1;
     int gutter_digits = (int)log10((double)(line_count(&e->text) + 1)) + 2;
     float gutter_w = (float)gutter_digits * cell + 18.0f;
@@ -672,18 +699,27 @@ static void build_draw_list(App *owner, DrawList *dl) {
             draw_glyph(dl, &vk->font, e->text.data[e->cursor], x, y, c);
         }
     }
-    const char *mode = e->mode == MODE_INSERT ? "-- INSERT --" : e->mode == MODE_VISUAL ? "-- VISUAL --" : e->mode == MODE_COMMAND ? ":" : "NORMAL";
-    draw_rect(dl, 0, h - line_h, w, line_h, gruvbox.gutter_bg);
+    float status_y = h - line_h * 2.0f;
+    float command_y = h - line_h;
+    draw_rect(dl, 0, status_y, w, line_h, gruvbox.gutter_bg);
+    draw_rect(dl, 0, command_y, w, line_h, gruvbox.bg);
+    char pending[64];
+    build_pending_keys(e, pending, sizeof(pending));
+    char status[768];
+    const char *path = e->path[0] ? e->path : "[No Name]";
+    int cursor_display_line = byte_line(&e->text, e->cursor) + 1;
+    int cursor_display_col = byte_col(&e->text, e->cursor) + 1;
+    snprintf(status, sizeof(status), "%s  [%zu/%zu]%s  %s  Ln %d, Col %d  %s%s",
+             mode_name(e), e->current_buffer + 1, e->buffer_count, e->dirty ? " +" : "",
+             path, cursor_display_line, cursor_display_col, pending[0] ? "keys: " : "",
+             pending);
+    draw_text(dl, &vk->font, status, 8.0f, status_y + 1.0f, gruvbox.line_no_current);
     if (e->mode == MODE_COMMAND) {
-        char status[320];
-        snprintf(status, sizeof(status), ":%s", e->command);
-        draw_text(dl, &vk->font, status, 8.0f, h - line_h + 1.0f, gruvbox.line_no_current);
-    } else {
-        char status[768];
-        const char *path = e->path[0] ? e->path : "[No Name]";
-        if (e->status[0]) snprintf(status, sizeof(status), "%s", e->status);
-        else snprintf(status, sizeof(status), "%s  [%zu/%zu]%s  %s", mode, e->current_buffer + 1, e->buffer_count, e->dirty ? " +" : "", path);
-        draw_text(dl, &vk->font, status, 8.0f, h - line_h + 1.0f, gruvbox.line_no_current);
+        char command[320];
+        snprintf(command, sizeof(command), ":%s", e->command);
+        draw_text(dl, &vk->font, command, 8.0f, command_y + 1.0f, gruvbox.line_no_current);
+    } else if (e->status[0]) {
+        draw_text(dl, &vk->font, e->status, 8.0f, command_y + 1.0f, gruvbox.line_no_current);
     }
 }
 
