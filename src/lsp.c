@@ -222,6 +222,10 @@ void lsp_request_hover(Editor *e) {
 
 void lsp_request_completion(Editor *e) {
     if (!e->lsp.running || !e->lsp.opened) return;
+    e->lsp.completion_visible = false;
+    e->lsp.completion_count = 0;
+    e->lsp.completion_selected = 0;
+    e->lsp.completion_scroll = 0;
     cJSON *params = cJSON_CreateObject();
     cJSON_AddItemToObject(params, "textDocument", text_document_obj(e));
     cJSON_AddItemToObject(params, "position", position_obj(e));
@@ -248,7 +252,19 @@ static void parse_hover(Editor *e, cJSON *result) {
         if (cJSON_IsString(value)) s = value->valuestring;
     }
     if (s) {
-        snprintf(e->lsp.hover, sizeof(e->lsp.hover), "%s", s);
+        size_t out = 0;
+        int blank_run = 0;
+        for (size_t i = 0; s[i] && out + 1 < sizeof(e->lsp.hover); i++) {
+            if (s[i] == '\r') continue;
+            if (s[i] == '\n') {
+                if (blank_run >= 1) continue;
+                blank_run++;
+            } else if (s[i] != ' ' && s[i] != '\t') {
+                blank_run = 0;
+            }
+            e->lsp.hover[out++] = s[i];
+        }
+        e->lsp.hover[out] = 0;
         e->lsp.hover_visible = true;
     }
 }
@@ -391,7 +407,27 @@ void lsp_poll(Editor *e) {
 bool lsp_completion_accept(Editor *e) {
     if (!e->lsp.completion_visible || e->lsp.completion_selected >= e->lsp.completion_count) return false;
     const char *s = e->lsp.completions[e->lsp.completion_selected];
-    for (size_t i = 0; s[i]; i++) editor_insert_char(e, (unsigned int)(unsigned char)s[i]);
+    size_t start = e->cursor;
+    while (start > 0) {
+        char ch = e->text.data[start - 1];
+        if (!isalnum((unsigned char)ch) && ch != '_') break;
+        start--;
+    }
+    size_t prefix_len = e->cursor - start;
+    size_t label_len = strlen(s);
+    size_t common = 0;
+    while (common < prefix_len && common < label_len && e->text.data[start + common] == s[common]) common++;
+    if (common < prefix_len) {
+        snapshot_stack_push(&e->undo, &e->text, e->cursor);
+        snapshot_stack_clear(&e->redo);
+        e->dirty = true;
+        e->lsp.needs_sync = true;
+        text_delete(&e->text, start + common, prefix_len - common);
+        e->cursor = start + common;
+        e->desired_col = byte_col(&e->text, e->cursor);
+        editor_reparse(e);
+    }
+    for (size_t i = common; s[i]; i++) editor_insert_char(e, (unsigned int)(unsigned char)s[i]);
     e->lsp.completion_visible = false;
     return true;
 }

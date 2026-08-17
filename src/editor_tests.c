@@ -538,6 +538,63 @@ static void test_lsp_completion_selection_scrolls_visible_window(void) {
     assert(e.lsp.completion_scroll == 4);
 }
 
+static void test_lsp_popups_close_on_escape_and_cursor_move(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\n", 0);
+    e.lsp.hover_visible = true;
+    e.lsp.completion_visible = true;
+
+    editor_key(&e, GLFW_KEY_ESCAPE, 0, 20);
+    assert(!e.lsp.hover_visible);
+    assert(!e.lsp.completion_visible);
+
+    e.lsp.hover_visible = true;
+    e.lsp.completion_visible = true;
+    editor_record_cursor_if_moved(&e, 0, 0, MODE_NORMAL, 0.0);
+    assert(e.lsp.hover_visible);
+    assert(e.lsp.completion_visible);
+    editor_key(&e, GLFW_KEY_L, 0, 20);
+    editor_record_cursor_if_moved(&e, 0, 0, MODE_NORMAL, 0.0);
+    assert(!e.lsp.hover_visible);
+    assert(!e.lsp.completion_visible);
+}
+
+static void test_lsp_completion_request_clears_stale_items(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\n", 0);
+    e.lsp.running = true;
+    e.lsp.opened = true;
+    e.lsp.in_fd = open("/dev/null", O_WRONLY);
+    assert(e.lsp.in_fd >= 0);
+    e.lsp.completion_visible = true;
+    e.lsp.completion_count = 3;
+    e.lsp.completion_selected = 2;
+    e.lsp.completion_scroll = 1;
+
+    lsp_request_completion(&e);
+    assert(!e.lsp.completion_visible);
+    assert(e.lsp.completion_count == 0);
+    assert(e.lsp.completion_selected == 0);
+    assert(e.lsp.completion_scroll == 0);
+    close(e.lsp.in_fd);
+}
+
+static void test_lsp_completion_accept_replaces_typed_prefix(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "pri\n", 3);
+    e.mode = MODE_INSERT;
+    e.lsp.completion_visible = true;
+    e.lsp.completion_count = 1;
+    e.lsp.completion_selected = 0;
+    snprintf(e.lsp.completions[0], sizeof(e.lsp.completions[0]), "printf");
+
+    assert(lsp_completion_accept(&e));
+    assert(strcmp(e.text.data, "printf\n") == 0);
+}
+
 static void test_visual_block_delete(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -639,6 +696,9 @@ int main(void) {
     test_regex_substitute_and_global();
     test_gd_and_gD_request_lsp_before_delete_operator();
     test_lsp_completion_selection_scrolls_visible_window();
+    test_lsp_popups_close_on_escape_and_cursor_move();
+    test_lsp_completion_request_clears_stale_items();
+    test_lsp_completion_accept_replaces_typed_prefix();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();

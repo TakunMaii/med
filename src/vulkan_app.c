@@ -717,14 +717,19 @@ static void draw_wrapped_text(DrawList *dl, FontAtlas *font, const char *s, floa
     int col = 0;
     int line = 0;
     float origin_x = x;
+    bool last_newline = false;
     for (size_t i = 0; s[i] && line < max_lines; i++) {
+        if (s[i] == '\r') continue;
         if (s[i] == '\n') {
+            if (last_newline) continue;
+            last_newline = true;
             line++;
             col = 0;
             x = origin_x;
             y += font->line_h;
             continue;
         }
+        last_newline = false;
         draw_glyph(dl, font, s[i], x, y, c);
         x += font->cell_w;
         col++;

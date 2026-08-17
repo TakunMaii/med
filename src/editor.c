@@ -1070,7 +1070,11 @@ static void editor_push_cursor_trail(Editor *e, int line, int col, Mode mode, do
 void editor_record_cursor_if_moved(Editor *e, int old_line, int old_col, Mode old_mode, double now) {
     int new_line = byte_line(&e->text, e->cursor);
     int new_col = byte_col(&e->text, e->cursor);
-    if (old_line != new_line || old_col != new_col) editor_push_cursor_trail(e, old_line, old_col, old_mode, now);
+    if (old_line != new_line || old_col != new_col) {
+        e->lsp.hover_visible = false;
+        e->lsp.completion_visible = false;
+        editor_push_cursor_trail(e, old_line, old_col, old_mode, now);
+    }
 }
 
 static void editor_yank_range(Editor *e, size_t start, size_t end);
@@ -1900,6 +1904,8 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     ReplayEvent ev = {.kind = REPLAY_KEY, .key = key, .mods = mods};
     if (key != GLFW_KEY_LEFT_SHIFT && key != GLFW_KEY_RIGHT_SHIFT) e->status[0] = 0;
     if (key == GLFW_KEY_ESCAPE) {
+        e->lsp.hover_visible = false;
+        e->lsp.completion_visible = false;
         editor_macro_record_event(e, ev);
         editor_record_change_event(e, ev);
         if (e->mode == MODE_INSERT && e->block_insert_active) editor_finish_block_insert(e);
