@@ -603,6 +603,49 @@ static void test_lsp_completion_accept_replaces_typed_prefix(void) {
     close(e.lsp.in_fd);
 }
 
+static void test_insert_tab_aligns_to_shiftwidth(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "  x\n", 2);
+    e.mode = MODE_INSERT;
+
+    editor_key(&e, GLFW_KEY_TAB, 0, 20);
+    assert(strcmp(e.text.data, "    x\n") == 0);
+    assert(e.cursor == 4);
+
+    editor_key(&e, GLFW_KEY_TAB, 0, 20);
+    assert(strcmp(e.text.data, "        x\n") == 0);
+    assert(e.cursor == 8);
+}
+
+static void test_insert_enter_autoindents(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "    foo\n", 7);
+    e.mode = MODE_INSERT;
+
+    editor_key(&e, GLFW_KEY_ENTER, 0, 20);
+    assert(strcmp(e.text.data, "    foo\n    \n") == 0);
+    assert(e.cursor == 12);
+}
+
+static void test_o_and_O_autoindent(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "    foo\nbar\n", 4);
+
+    editor_key(&e, GLFW_KEY_O, 0, 20);
+    assert(strcmp(e.text.data, "    foo\n    \nbar\n") == 0);
+    assert(e.mode == MODE_INSERT);
+    assert(e.cursor == 12);
+
+    reset_editor_text(&e, "    foo\nbar\n", 4);
+    editor_key(&e, GLFW_KEY_O, GLFW_MOD_SHIFT, 20);
+    assert(strcmp(e.text.data, "    \n    foo\nbar\n") == 0);
+    assert(e.mode == MODE_INSERT);
+    assert(e.cursor == 4);
+}
+
 static void test_ctrl_o_returns_to_previous_jump(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -720,6 +763,9 @@ int main(void) {
     test_lsp_popups_close_on_escape_and_cursor_move();
     test_lsp_completion_request_clears_stale_items();
     test_lsp_completion_accept_replaces_typed_prefix();
+    test_insert_tab_aligns_to_shiftwidth();
+    test_insert_enter_autoindents();
+    test_o_and_O_autoindent();
     test_ctrl_o_returns_to_previous_jump();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();

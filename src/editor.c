@@ -1179,6 +1179,47 @@ static void editor_newline(Editor *e) {
     editor_reparse(e);
 }
 
+static size_t line_indent_len(const Text *t, size_t pos) {
+    size_t p = line_start_at(t, pos);
+    size_t end = line_end_at(t, p);
+    size_t start = p;
+    while (p < end && (t->data[p] == ' ' || t->data[p] == '\t')) p++;
+    return p - start;
+}
+
+static void editor_insert_bytes_for_insert(Editor *e, const char *s, size_t n) {
+    if (n == 0) return;
+    editor_begin_insert_change(e);
+    text_insert(&e->text, e->cursor, s, n);
+    editor_record_insert_text(e, s, n);
+    e->cursor += n;
+    e->desired_col = byte_col(&e->text, e->cursor);
+    editor_reparse(e);
+}
+
+static void editor_newline_autoindent(Editor *e, size_t indent_source_pos) {
+    size_t indent_start = line_start_at(&e->text, indent_source_pos);
+    size_t indent_len = line_indent_len(&e->text, indent_source_pos);
+    char *indent = NULL;
+    if (indent_len > 0) {
+        indent = xmalloc(indent_len);
+        memcpy(indent, e->text.data + indent_start, indent_len);
+    }
+    editor_newline(e);
+    if (indent_len > 0) {
+        editor_insert_bytes_for_insert(e, indent, indent_len);
+        free(indent);
+    }
+}
+
+static void editor_insert_tab(Editor *e) {
+    int col = byte_col(&e->text, e->cursor);
+    int spaces = 4 - (col % 4);
+    if (spaces <= 0) spaces = 4;
+    char buf[4] = {' ', ' ', ' ', ' '};
+    editor_insert_bytes_for_insert(e, buf, (size_t)spaces);
+}
+
 static void editor_delete_line(Editor *e) {
     editor_begin_change(e);
     size_t start = line_start_at(&e->text, e->cursor);
@@ -1971,7 +2012,8 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         if (!e->building_change && editor_event_changes_text(ev) && !e->replaying) editor_begin_recorded_change(e);
         editor_record_change_event(e, ev);
         if (key == GLFW_KEY_BACKSPACE) editor_backspace(e);
-        else if (key == GLFW_KEY_ENTER) editor_newline(e);
+        else if (key == GLFW_KEY_ENTER) editor_newline_autoindent(e, e->cursor);
+        else if (key == GLFW_KEY_TAB) editor_insert_tab(e);
         else if (key == GLFW_KEY_LEFT) editor_move_left(e);
         else if (key == GLFW_KEY_RIGHT) editor_move_right(e);
         else if (key == GLFW_KEY_UP) editor_move_vertical(e, -1);
@@ -2285,15 +2327,27 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     } else if (c == 'o' || c == 'O') {
         if (c == 'O') {
             size_t start = line_start_at(&e->text, e->cursor);
+            size_t indent_len = line_indent_len(&e->text, e->cursor);
+            char *indent = NULL;
+            if (indent_len > 0) {
+                indent = xmalloc(indent_len);
+                memcpy(indent, e->text.data + start, indent_len);
+            }
             editor_begin_change(e);
             text_insert(&e->text, start, "\n", 1);
             e->cursor = start;
-            e->desired_col = 0;
+            if (indent_len > 0) {
+                text_insert(&e->text, e->cursor, indent, indent_len);
+                e->cursor += indent_len;
+            }
+            free(indent);
+            e->desired_col = byte_col(&e->text, e->cursor);
             editor_reparse(e);
         } else {
             size_t end = line_end_at(&e->text, e->cursor);
+            size_t source = e->cursor;
             e->cursor = end;
-            editor_newline(e);
+            editor_newline_autoindent(e, source);
         }
         e->mode = MODE_INSERT;
         e->pending = 0;
