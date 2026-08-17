@@ -311,6 +311,7 @@ static void jump_to_location(Editor *e, cJSON *result) {
     int target_col = cJSON_IsNumber(ch) ? ch->valueint : 0;
     char path[1024];
     uri_to_path(uri->valuestring, path, sizeof(path));
+    editor_push_jump(e);
     if (strcmp(path, e->path) != 0) {
         editor_open_buffer(e, path);
         file_uri(e->path, e->lsp.uri, sizeof(e->lsp.uri));
@@ -427,8 +428,11 @@ bool lsp_completion_accept(Editor *e) {
         e->desired_col = byte_col(&e->text, e->cursor);
         editor_reparse(e);
     }
+    e->suppress_completion_request = true;
     for (size_t i = common; s[i]; i++) editor_insert_char(e, (unsigned int)(unsigned char)s[i]);
+    e->suppress_completion_request = false;
     e->lsp.completion_visible = false;
+    e->lsp.completion_count = 0;
     return true;
 }
 

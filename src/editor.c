@@ -1077,6 +1077,36 @@ void editor_record_cursor_if_moved(Editor *e, int old_line, int old_col, Mode ol
     }
 }
 
+void editor_push_jump(Editor *e) {
+    if (e->jump_count > 0) {
+        JumpLocation *last = &e->jumps[e->jump_count - 1];
+        if (last->cursor == e->cursor && strcmp(last->path, e->path) == 0) return;
+    }
+    if (e->jump_count == EDITOR_JUMP_STACK_MAX) {
+        memmove(e->jumps, e->jumps + 1, sizeof(e->jumps[0]) * (EDITOR_JUMP_STACK_MAX - 1));
+        e->jump_count--;
+    }
+    JumpLocation *j = &e->jumps[e->jump_count++];
+    snprintf(j->path, sizeof(j->path), "%s", e->path);
+    j->cursor = e->cursor;
+}
+
+void editor_jump_back(Editor *e) {
+    if (e->jump_count == 0) {
+        snprintf(e->status, sizeof(e->status), "Jump list is empty");
+        return;
+    }
+    JumpLocation j = e->jumps[--e->jump_count];
+    if (j.path[0] && strcmp(j.path, e->path) != 0) {
+        editor_open_buffer(e, j.path);
+    }
+    e->cursor = j.cursor <= e->text.len ? j.cursor : e->text.len;
+    e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
+    e->desired_col = byte_col(&e->text, e->cursor);
+    e->lsp.hover_visible = false;
+    e->lsp.completion_visible = false;
+}
+
 static void editor_yank_range(Editor *e, size_t start, size_t end);
 
 void editor_insert_char(Editor *e, unsigned int cp) {
@@ -1092,7 +1122,9 @@ void editor_insert_char(Editor *e, unsigned int cp) {
     e->cursor++;
     e->desired_col = byte_col(&e->text, e->cursor);
     editor_reparse(e);
-    if (isalnum((unsigned char)c) || c == '_' || c == '.' || c == '>') lsp_request_completion(e);
+    if (!e->suppress_completion_request && (isalnum((unsigned char)c) || c == '_' || c == '.' || c == '>')) {
+        lsp_request_completion(e);
+    }
 }
 
 static void editor_backspace(Editor *e) {
@@ -1926,6 +1958,12 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
         e->desired_col = byte_col(&e->text, e->cursor);
         editor_commit_recorded_change(e);
+        return;
+    }
+    if ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_O) {
+        e->lsp.hover_visible = false;
+        e->lsp.completion_visible = false;
+        editor_jump_back(e);
         return;
     }
     if (e->mode == MODE_INSERT) {

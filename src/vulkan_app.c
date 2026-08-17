@@ -742,6 +742,44 @@ static void draw_wrapped_text(DrawList *dl, FontAtlas *font, const char *s, floa
     }
 }
 
+static size_t bounded_strlen(const char *s, size_t max_len) {
+    size_t n = 0;
+    while (n < max_len && s[n]) n++;
+    return n;
+}
+
+static void measure_wrapped_text(const char *s, int max_cols, int max_lines, int *out_cols, int *out_lines) {
+    int col = 0;
+    int line = 1;
+    int max_seen = 0;
+    bool last_newline = false;
+    if (max_cols < 1) max_cols = 1;
+    if (max_lines < 1) max_lines = 1;
+    for (size_t i = 0; s[i] && line <= max_lines; i++) {
+        if (s[i] == '\r') continue;
+        if (s[i] == '\n') {
+            if (last_newline) continue;
+            if (col > max_seen) max_seen = col;
+            col = 0;
+            line++;
+            last_newline = true;
+            continue;
+        }
+        last_newline = false;
+        col++;
+        if (col >= max_cols) {
+            if (col > max_seen) max_seen = col;
+            col = 0;
+            line++;
+        }
+    }
+    if (col > max_seen) max_seen = col;
+    if (line > max_lines) line = max_lines;
+    if (max_seen < 1) max_seen = 1;
+    *out_cols = max_seen;
+    *out_lines = line;
+}
+
 static void command_cursor_position(const Editor *e, float command_y, float cell, float line_h, int cols, float *x, float *y) {
     if (cols < 2) cols = 2;
     int col = 1;
@@ -1109,8 +1147,21 @@ static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float edit
         size_t first = e->lsp.completion_scroll;
         if (first >= e->lsp.completion_count) first = 0;
         if (first + rows > e->lsp.completion_count) rows = e->lsp.completion_count - first;
-        float w = 42.0f * cell;
+        size_t max_cols = 1;
+        for (size_t i = 0; i < rows; i++) {
+            size_t item_index = first + i;
+            size_t label_len = bounded_strlen(e->lsp.completions[item_index], 64);
+            size_t detail_len = bounded_strlen(e->lsp.completion_details[item_index], 63);
+            size_t cols = label_len + (detail_len ? 1 + detail_len : 0);
+            if (cols > max_cols) max_cols = cols;
+        }
+        if (max_cols < 18) max_cols = 18;
+        if (max_cols > 128) max_cols = 128;
+        float w = (float)max_cols * cell + 14.0f;
+        float max_w = (float)vk->extent.width - 16.0f;
+        if (w > max_w) w = max_w;
         float h = (float)rows * line_h + 6.0f;
+        if (x < 8.0f) x = 8.0f;
         if (x + w > (float)vk->extent.width) x = (float)vk->extent.width - w - 8.0f;
         draw_rect(dl, x, y, w, h, popup_bg);
         draw_rect(dl, x, y, w, 1.0f, gruvbox.gutter_fg);
@@ -1119,21 +1170,35 @@ static void draw_lsp_popups(App *owner, DrawList *dl, float editor_y, float edit
             size_t item_index = first + i;
             float row_y = y + 3.0f + (float)i * line_h;
             if (item_index == e->lsp.completion_selected) draw_rect(dl, x + 2.0f, row_y, w - 4.0f, line_h, gruvbox.selection);
-            char item[256];
-            snprintf(item, sizeof(item), "%-24.24s %.24s", e->lsp.completions[item_index], e->lsp.completion_details[item_index]);
+            char item[320];
+            if (e->lsp.completion_details[item_index][0]) snprintf(item, sizeof(item), "%.64s %.63s", e->lsp.completions[item_index], e->lsp.completion_details[item_index]);
+            else snprintf(item, sizeof(item), "%.128s", e->lsp.completions[item_index]);
             draw_text(dl, &vk->font, item, x + 6.0f, row_y + 1.0f, gruvbox.fg);
         }
     }
     if (e->lsp.hover_visible && e->lsp.hover[0]) {
         float hx = x;
         float hy = y + line_h;
-        float hw = 72.0f * cell;
-        float hh = 8.0f * line_h;
+        int max_cols = (int)(((float)vk->extent.width - 32.0f) / cell);
+        if (max_cols > 128) max_cols = 128;
+        int measured_cols = 0;
+        int measured_lines = 0;
+        measure_wrapped_text(e->lsp.hover, max_cols, 18, &measured_cols, &measured_lines);
+        if (measured_cols < 24) measured_cols = 24;
+        float hw = (float)measured_cols * cell + 16.0f;
+        float max_hw = (float)vk->extent.width - 16.0f;
+        if (hw > max_hw) hw = max_hw;
+        float hh = (float)measured_lines * line_h + 10.0f;
+        float max_hh = editor_h - line_h;
+        if (hh > max_hh) hh = max_hh > line_h ? max_hh : line_h;
         if (hy + hh > editor_y + editor_h) hy = y - hh - line_h;
+        if (hx < 8.0f) hx = 8.0f;
         if (hx + hw > (float)vk->extent.width) hx = (float)vk->extent.width - hw - 8.0f;
         draw_rect(dl, hx, hy, hw, hh, popup_bg);
         draw_rect(dl, hx, hy, hw, 1.0f, gruvbox.gutter_fg);
-        draw_wrapped_text(dl, &vk->font, e->lsp.hover, hx + 8.0f, hy + 5.0f, 70, 7, gruvbox.fg);
+        int hover_cols = (int)((hw - 16.0f) / cell);
+        int hover_lines = (int)((hh - 8.0f) / line_h);
+        draw_wrapped_text(dl, &vk->font, e->lsp.hover, hx + 8.0f, hy + 5.0f, hover_cols, hover_lines, gruvbox.fg);
     }
 }
 

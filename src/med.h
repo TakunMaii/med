@@ -48,6 +48,7 @@
 #define EDITOR_REPLAY_MAX_EVENTS 512
 #define EDITOR_MACRO_MAX_EVENTS 1024
 #define EDITOR_MACRO_REPLAY_LIMIT 10000
+#define EDITOR_JUMP_STACK_MAX 64
 #define MED_PARSE_MAX_BYTES (2u * 1024u * 1024u)
 #define MED_UNDO_SNAPSHOT_MAX_BYTES (2u * 1024u * 1024u)
 
@@ -211,8 +212,8 @@ typedef struct {
     size_t read_len;
     char hover[4096];
     bool hover_visible;
-    char completions[32][160];
-    char completion_details[32][160];
+    char completions[32][256];
+    char completion_details[32][256];
     size_t completion_count;
     size_t completion_selected;
     size_t completion_scroll;
@@ -220,6 +221,11 @@ typedef struct {
     LspDiagnostic diagnostics[64];
     size_t diagnostic_count;
 } LspClient;
+
+typedef struct {
+    char path[512];
+    size_t cursor;
+} JumpLocation;
 
 typedef struct {
     Text text;
@@ -303,6 +309,9 @@ typedef struct {
     TSTree *tree;
     Highlights highlights;
     LspClient lsp;
+    bool suppress_completion_request;
+    JumpLocation jumps[EDITOR_JUMP_STACK_MAX];
+    size_t jump_count;
     BufferSlot *buffers;
     size_t buffer_count;
     size_t current_buffer;
@@ -451,6 +460,8 @@ void editor_focus_view_direction(Editor *e, char dir);
 void editor_tab_new(Editor *e, const char *path);
 void editor_tab_switch(Editor *e, int delta);
 void editor_tab_close(Editor *e);
+void editor_push_jump(Editor *e);
+void editor_jump_back(Editor *e);
 
 void lsp_init(LspClient *lsp);
 void lsp_shutdown(LspClient *lsp);

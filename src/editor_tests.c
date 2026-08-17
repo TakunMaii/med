@@ -586,6 +586,10 @@ static void test_lsp_completion_accept_replaces_typed_prefix(void) {
     editor_init(&e, NULL);
     reset_editor_text(&e, "pri\n", 3);
     e.mode = MODE_INSERT;
+    e.lsp.running = true;
+    e.lsp.opened = true;
+    e.lsp.in_fd = open("/dev/null", O_WRONLY);
+    assert(e.lsp.in_fd >= 0);
     e.lsp.completion_visible = true;
     e.lsp.completion_count = 1;
     e.lsp.completion_selected = 0;
@@ -593,6 +597,23 @@ static void test_lsp_completion_accept_replaces_typed_prefix(void) {
 
     assert(lsp_completion_accept(&e));
     assert(strcmp(e.text.data, "printf\n") == 0);
+    assert(!e.lsp.completion_visible);
+    assert(e.lsp.completion_count == 0);
+    assert(e.lsp.completion_id == 0);
+    close(e.lsp.in_fd);
+}
+
+static void test_ctrl_o_returns_to_previous_jump(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one\ntwo\nthree\n", 0);
+
+    editor_push_jump(&e);
+    e.cursor = line_start_by_number(&e.text, 2);
+    e.desired_col = byte_col(&e.text, e.cursor);
+    editor_key(&e, GLFW_KEY_O, GLFW_MOD_CONTROL, 20);
+
+    assert(e.cursor == 0);
 }
 
 static void test_visual_block_delete(void) {
@@ -699,6 +720,7 @@ int main(void) {
     test_lsp_popups_close_on_escape_and_cursor_move();
     test_lsp_completion_request_clears_stale_items();
     test_lsp_completion_accept_replaces_typed_prefix();
+    test_ctrl_o_returns_to_previous_jump();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();
