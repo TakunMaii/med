@@ -14,6 +14,16 @@ static void reset_editor_text(Editor *e, const char *text, size_t cursor) {
     e->desired_col = byte_col(&e->text, e->cursor);
 }
 
+static void execute_command(Editor *e, const char *cmd) {
+    App app;
+    memset(&app, 0, sizeof(app));
+    app.editor = *e;
+    snprintf(app.editor.command, sizeof(app.editor.command), "%s", cmd);
+    app.editor.command_len = strlen(app.editor.command);
+    app_execute_command(&app);
+    *e = app.editor;
+}
+
 static void test_dw_keeps_next_word(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -342,6 +352,85 @@ static void test_named_register_yank_and_paste(void) {
     assert(strcmp(e.text.data, "one\ntwo\none\n") == 0);
 }
 
+static void test_ex_range_delete_and_yank(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "one\ntwo\nthree\n", 0);
+
+    execute_command(&e, "1,2d");
+    assert(strcmp(e.text.data, "three\n") == 0);
+    assert(strcmp(e.yank.data, "one\ntwo\n") == 0);
+
+    execute_command(&e, "%y");
+    assert(e.yank_linewise);
+    assert(strcmp(e.yank.data, "three\n") == 0);
+}
+
+static void test_ex_substitute_literal_global_flag(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "foo foo\nfoo\n", 0);
+
+    execute_command(&e, "%s/foo/bar/g");
+
+    assert(strcmp(e.text.data, "bar bar\nbar\n") == 0);
+}
+
+static void test_ex_global_and_inverse_delete(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "keep\nzap\nkeep too\n", 0);
+
+    execute_command(&e, "g/zap/d");
+    assert(strcmp(e.text.data, "keep\nkeep too\n") == 0);
+    execute_command(&e, "v/too/d");
+    assert(strcmp(e.text.data, "keep too\n") == 0);
+}
+
+static void test_visual_block_replace(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\ndef\n", 1);
+
+    editor_key(&e, GLFW_KEY_V, GLFW_MOD_CONTROL, 20);
+    editor_key(&e, GLFW_KEY_DOWN, 0, 20);
+    editor_key(&e, GLFW_KEY_RIGHT, 0, 20);
+    editor_key(&e, GLFW_KEY_R, 0, 20);
+    editor_handle_waiting_char(&e, 'X');
+
+    assert(strcmp(e.text.data, "aXX\ndXX\n") == 0);
+    assert(e.mode == MODE_NORMAL);
+}
+
+static void test_gt_and_gT_switch_tabs(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    editor_tab_new(&e, NULL);
+    assert(e.current_tab == 1);
+
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_T, GLFW_MOD_SHIFT, 20);
+    assert(e.current_tab == 0);
+    editor_key(&e, GLFW_KEY_G, 0, 20);
+    editor_key(&e, GLFW_KEY_T, 0, 20);
+    assert(e.current_tab == 1);
+}
+
+static void test_ctrl_w_cycle_and_quit_window(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    editor_split_current(&e, true, NULL);
+    assert(e.tabs[0].view_count == 2);
+    assert(e.tabs[0].active_view == 1);
+
+    editor_key(&e, GLFW_KEY_W, GLFW_MOD_CONTROL, 20);
+    editor_key(&e, GLFW_KEY_W, 0, 20);
+    assert(e.tabs[0].active_view == 0);
+    editor_key(&e, GLFW_KEY_W, GLFW_MOD_CONTROL, 20);
+    editor_key(&e, GLFW_KEY_Q, 0, 20);
+    assert(e.tabs[0].view_count == 1);
+}
+
 static void test_visual_block_delete(void) {
     Editor e;
     editor_init(&e, NULL);
@@ -431,6 +520,12 @@ int main(void) {
     test_toggle_case_count();
     test_marks_exact_and_linewise_jump();
     test_named_register_yank_and_paste();
+    test_ex_range_delete_and_yank();
+    test_ex_substitute_literal_global_flag();
+    test_ex_global_and_inverse_delete();
+    test_visual_block_replace();
+    test_gt_and_gT_switch_tabs();
+    test_ctrl_w_cycle_and_quit_window();
     test_split_creates_independent_view();
     test_tab_new_creates_tab();
     test_text_line_index_updates();

@@ -44,6 +44,7 @@ ctest --test-dir build --output-on-failure
 - Insert: `i`, `a`, `I`, `A`, `o`, `O`
 - `Esc`: return to normal mode; insert-mode edits are grouped into a single undo step
 - Visual: `v` for character selection, `V` for line selection, `Ctrl-v` for block selection, `o` to swap selection endpoints, `gv` to restore the previous selection
+- Visual block: `r{char}` replaces the selected block
 - Operators: `d`, `c`, `y` with motions, including `dd`, `cc`, `yy`, `dw`, `cw`, `d$`, `c0`
 - Text objects: `iw`, `aw`, `iW`, `aW`, `ip`, `ap`, plus delimiter objects such as `i(`, `a(`, `i"`, `a"`
 - Edit: `x`, `s`, `S`, `D`, `r`, `~`, `.`, `u`, `Ctrl-r`; `.` repeats simple edits and the last inserted text
@@ -53,6 +54,9 @@ ctest --test-dir build --output-on-failure
 - Search: `/pattern`, `?pattern`, `n`, `N`
 - Command line: defaults to one line, wraps/expands up to eight lines for long input or output; `Shift-Enter` or `Ctrl-Enter` inserts a command-line newline
 - `:w`, `:w filename`, `:q`, `:q!`, `:wq`: write and quit commands
+- Ex ranges: `:1,3d`, `:%d`, `:1,3y`, `:%y`
+- Substitute/global: `:s/foo/bar/`, `:%s/foo/bar/g`, `:g/pat/d`, `:v/pat/d` use literal matching
 - `:e path`: open a file in a new buffer
 - `:bnew`, `:bn`, `:bp`, `:bfirst`, `:blast`, `:buffer N`, `:ls`, `:bd`, `:bd!`: buffer commands; `:ls` uses multiline output
+- Windows/tabs: `Ctrl-w s`, `Ctrl-w v`, `Ctrl-w w`, `Ctrl-w q`, `Ctrl-w c`, `Ctrl-w o`, `Ctrl-w h/j/k/l`, `gt`, `gT`
 - `:set number`, `:set nonumber`, `:set relativenumber`, `:set norelativenumber`
