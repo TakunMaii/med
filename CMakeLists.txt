@@ -13,7 +13,12 @@ pkg_check_modules(TREE_SITTER REQUIRED tree-sitter)
 
 find_library(TREE_SITTER_C_LIB tree-sitter-c REQUIRED)
 
-add_executable(med src/main.c)
+add_executable(med
+  src/main.c
+  src/common.c
+  src/editor.c
+  src/vulkan_app.c
+)
 
 target_include_directories(med PRIVATE
   ${GLFW_INCLUDE_DIRS}
