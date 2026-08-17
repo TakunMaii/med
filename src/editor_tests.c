@@ -162,6 +162,31 @@ static void test_visual_block_delete(void) {
     assert(strcmp(e.yank.data, "bc\nef") == 0);
 }
 
+static void test_split_creates_independent_view(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    reset_editor_text(&e, "abc\ndef\n", 0);
+
+    editor_split_current(&e, true, NULL);
+    assert(e.tab_count == 1);
+    assert(e.tabs[0].view_count == 2);
+    assert(e.tabs[0].nodes[e.tabs[0].root].kind == SPLIT_COL);
+    assert(e.tabs[0].active_view == 1);
+}
+
+static void test_tab_new_creates_tab(void) {
+    Editor e;
+    editor_init(&e, NULL);
+    size_t old_buffer = e.tabs[0].views[0].buffer_index;
+
+    editor_tab_new(&e, NULL);
+    assert(e.tab_count == 2);
+    assert(e.current_tab == 1);
+    assert(e.tabs[1].view_count == 1);
+    assert(e.tabs[0].views[0].buffer_index == old_buffer);
+    assert(e.tabs[1].views[0].buffer_index != old_buffer);
+}
+
 int main(void) {
     test_dw_keeps_next_word();
     test_dw_stops_before_punctuation_word();
@@ -174,5 +199,7 @@ int main(void) {
     test_explicit_one_g_goes_to_first_line();
     test_visual_block_delete();
     test_visual_delete_updates_yank();
+    test_split_creates_independent_view();
+    test_tab_new_creates_tab();
     return 0;
 }

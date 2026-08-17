@@ -27,6 +27,11 @@ typedef struct {
     float _pad;
 } CursorPush;
 
+typedef struct {
+    float x, y, w, h;
+    size_t view_index;
+} PaneRect;
+
 static uint32_t find_memory(VkPhysicalDevice physical, uint32_t type_bits, VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties mem;
     vkGetPhysicalDeviceMemoryProperties(physical, &mem);
@@ -521,6 +526,9 @@ static void framebuffer_cb(GLFWwindow *window, int w, int h) {
     App *app = glfwGetWindowUserPointer(window);
     app->vk.framebuffer_resized = true;
 }
+
+static float tab_bar_height(const Editor *e, float line_h);
+
 static void char_cb(GLFWwindow *window, unsigned int cp) {
     App *app = glfwGetWindowUserPointer(window);
     Editor *e = &app->editor;
@@ -560,7 +568,8 @@ static void key_cb(GLFWwindow *window, int key, int scancode, int action, int mo
     bool track_cursor = e->mode != MODE_COMMAND;
     int fbw = 0, fbh = 0;
     glfwGetFramebufferSize(window, &fbw, &fbh);
-    int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - app->vk.font.line_h * 2.0f) / app->vk.font.line_h) : 1;
+    float tab_h = tab_bar_height(e, app->vk.font.line_h);
+    int rows = app->vk.font.line_h > 0 ? (int)(((float)fbh - tab_h - app->vk.font.line_h * 2.0f) / app->vk.font.line_h) : 1;
     if (rows < 1) rows = 1;
     if (e->waiting_char && key != GLFW_KEY_ESCAPE) return;
     if (e->mode == MODE_COMMAND) {
@@ -719,6 +728,85 @@ static void build_pending_keys(const Editor *e, char *dst, size_t dst_size) {
     }
 }
 
+static void apply_view_for_render(Editor *dst, const Editor *src, size_t view_index) {
+    *dst = *src;
+    if (src->tab_count == 0 || src->current_tab >= src->tab_count) return;
+    const EditorTab *tab = &src->tabs[src->current_tab];
+    if (view_index >= tab->view_count) return;
+    const EditorView *v = &tab->views[view_index];
+    if (v->buffer_index >= src->buffer_count) return;
+    const BufferSlot *b = &src->buffers[v->buffer_index];
+    dst->text = b->text;
+    memcpy(dst->path, b->path, sizeof(dst->path));
+    dst->dirty = b->dirty;
+    dst->cursor = v->cursor <= b->text.len ? v->cursor : b->text.len;
+    dst->visual_anchor = v->visual_anchor <= b->text.len ? v->visual_anchor : dst->cursor;
+    dst->desired_col = v->desired_col;
+    dst->top_line = v->top_line;
+    dst->left_col = v->left_col;
+    dst->tree = b->tree;
+    dst->highlights = b->highlights;
+    dst->current_buffer = v->buffer_index;
+    if (view_index != tab->active_view) {
+        dst->mode = MODE_NORMAL;
+        dst->visual_line = false;
+        dst->visual_block = false;
+    }
+}
+
+static void collect_panes(const EditorTab *tab, int node_index, float x, float y, float w, float h, PaneRect *out, size_t *count) {
+    if (node_index < 0 || (size_t)node_index >= tab->node_count || *count >= EDITOR_MAX_VIEWS) return;
+    const SplitNode *n = &tab->nodes[node_index];
+    if (n->kind == SPLIT_LEAF) {
+        out[(*count)++] = (PaneRect){x, y, w, h, n->view_index};
+        return;
+    }
+    float gap = 3.0f;
+    if (n->kind == SPLIT_COL) {
+        float first_w = floorf((w - gap) * n->ratio);
+        collect_panes(tab, n->first, x, y, first_w, h, out, count);
+        collect_panes(tab, n->second, x + first_w + gap, y, w - first_w - gap, h, out, count);
+    } else {
+        float first_h = floorf((h - gap) * n->ratio);
+        collect_panes(tab, n->first, x, y, w, first_h, out, count);
+        collect_panes(tab, n->second, x, y + first_h + gap, w, h - first_h - gap, out, count);
+    }
+}
+
+static const char *buffer_display_name(const BufferSlot *b) {
+    if (!b->path[0]) return "[No Name]";
+    const char *slash = strrchr(b->path, '/');
+    return slash ? slash + 1 : b->path;
+}
+
+static void draw_tab_bar(App *owner, DrawList *dl, float w, float line_h) {
+    Editor *e = &owner->editor;
+    if (e->tab_count <= 1) return;
+    VkApp *vk = &owner->vk;
+    draw_rect(dl, 0, 0, w, line_h + 4.0f, gruvbox.gutter_bg);
+    float x = 8.0f;
+    for (size_t i = 0; i < e->tab_count; i++) {
+        EditorTab *tab = &e->tabs[i];
+        size_t view = tab->active_view < tab->view_count ? tab->active_view : 0;
+        size_t buffer = tab->view_count ? tab->views[view].buffer_index : 0;
+        if (buffer >= e->buffer_count) buffer = 0;
+        const BufferSlot *b = &e->buffers[buffer];
+        char label[160];
+        snprintf(label, sizeof(label), "%zu  %s%s", i + 1, buffer_display_name(b), b->dirty ? " +" : "");
+        float tab_w = (float)strlen(label) * vk->font.cell_w + 22.0f;
+        Color bg = i == e->current_tab ? gruvbox.bg : gruvbox.gutter_bg;
+        draw_rect(dl, x, 3.0f, tab_w, line_h - 2.0f, bg);
+        if (i == e->current_tab) draw_rect(dl, x, line_h + 1.0f, tab_w, 2.0f, gruvbox.line_no_current);
+        draw_text(dl, &vk->font, label, x + 10.0f, 4.0f, i == e->current_tab ? gruvbox.line_no_current : gruvbox.gutter_fg);
+        x += tab_w + 4.0f;
+        if (x > w) break;
+    }
+}
+
+static float tab_bar_height(const Editor *e, float line_h) {
+    return e->tab_count > 1 ? line_h + 4.0f : 0.0f;
+}
+
 static float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
@@ -762,8 +850,7 @@ static void update_cursor_animation(Editor *e, float target_x, float target_y, d
     }
 }
 
-static void build_cursor_segments(App *owner, float gutter_w, float cell, float line_h, int rows, float editor_h, float command_y) {
-    Editor *e = &owner->editor;
+static void build_cursor_segments(App *owner, Editor *e, float pane_x, float pane_y, float pane_w, float pane_h, float gutter_w, float cell, float line_h, int rows, float command_y) {
     VkApp *vk = &owner->vk;
     vk->cursor_segment_count = 0;
     bool command = e->mode == MODE_COMMAND;
@@ -782,8 +869,8 @@ static void build_cursor_segments(App *owner, float gutter_w, float cell, float 
         float target_row = (float)(target_line_i - e->top_line);
         float target_screen_col = (float)(target_col_i - e->left_col);
         if (target_row < 0.0f || target_row >= (float)rows || target_screen_col < 0.0f) return;
-        p1x = gutter_w + 8.0f + target_screen_col * cell + (insert ? 1.0f : cell * 0.5f);
-        p1y = target_row * line_h + 2.0f + line_h * 0.5f;
+        p1x = pane_x + gutter_w + 8.0f + target_screen_col * cell + (insert ? 1.0f : cell * 0.5f);
+        p1y = pane_y + target_row * line_h + 2.0f + line_h * 0.5f;
     }
     double now = glfwGetTime();
     update_cursor_animation(e, p1x, p1y, now);
@@ -805,10 +892,10 @@ static void build_cursor_segments(App *owner, float gutter_w, float cell, float 
     s->rect_min[1] = fminf(p0y, p1y) - margin;
     s->rect_max[0] = fmaxf(p0x, p1x) + margin;
     s->rect_max[1] = fmaxf(p0y, p1y) + margin;
-    s->rect_min[0] = clampf(s->rect_min[0], 0.0f, (float)vk->extent.width);
-    s->rect_min[1] = clampf(s->rect_min[1], 0.0f, command ? (float)vk->extent.height : editor_h);
-    s->rect_max[0] = clampf(s->rect_max[0], 0.0f, (float)vk->extent.width);
-    s->rect_max[1] = clampf(s->rect_max[1], 0.0f, command ? (float)vk->extent.height : editor_h);
+    s->rect_min[0] = clampf(s->rect_min[0], command ? 0.0f : pane_x, command ? (float)vk->extent.width : pane_x + pane_w);
+    s->rect_min[1] = clampf(s->rect_min[1], command ? 0.0f : pane_y, command ? (float)vk->extent.height : pane_y + pane_h);
+    s->rect_max[0] = clampf(s->rect_max[0], command ? 0.0f : pane_x, command ? (float)vk->extent.width : pane_x + pane_w);
+    s->rect_max[1] = clampf(s->rect_max[1], command ? 0.0f : pane_y, command ? (float)vk->extent.height : pane_y + pane_h);
     if (s->rect_min[0] >= s->rect_max[0] || s->rect_min[1] >= s->rect_max[1]) {
         vk->cursor_segment_count--;
         return;
@@ -830,6 +917,68 @@ static void build_cursor_segments(App *owner, float gutter_w, float cell, float 
     s->_pad = 0.0f;
 }
 
+static void draw_editor_pane(App *owner, DrawList *dl, Editor *pe, float x0, float y0, float w, float h, bool active, float command_y) {
+    VkApp *vk = &owner->vk;
+    float line_h = vk->font.line_h;
+    float cell = vk->font.cell_w;
+    int rows = (int)(h / line_h);
+    if (rows < 1) rows = 1;
+    int gutter_digits = (int)log10((double)(line_count(&pe->text) + 1)) + 2;
+    float gutter_w = (float)gutter_digits * cell + 18.0f;
+    int cols = (int)((w - gutter_w - 12.0f) / cell);
+    if (active) {
+        editor_ensure_visible(pe, rows, cols);
+        build_cursor_segments(owner, pe, x0, y0, w, h, gutter_w, cell, line_h, rows, command_y);
+    }
+    draw_rect(dl, x0, y0, w, h, gruvbox.bg);
+    draw_rect(dl, x0, y0, gutter_w, h, gruvbox.gutter_bg);
+    Color border = active ? gruvbox.line_no_current : gruvbox.gutter_fg;
+    border.a = active ? 0.9f : 0.25f;
+    draw_rect(dl, x0, y0, w, 1.0f, border);
+    draw_rect(dl, x0, y0 + h - 1.0f, w, 1.0f, border);
+    draw_rect(dl, x0, y0, 1.0f, h, border);
+    draw_rect(dl, x0 + w - 1.0f, y0, 1.0f, h, border);
+
+    int cursor_line = byte_line(&pe->text, pe->cursor);
+    for (int row = 0; row < rows; row++) {
+        int line_no = pe->top_line + row;
+        if (line_no >= line_count(&pe->text)) break;
+        float y = y0 + row * line_h + 2.0f;
+        char num[32];
+        int rel = abs(line_no - cursor_line);
+        int width = gutter_digits - 1;
+        if (width > 16) width = 16;
+        char raw[24];
+        int shown_no = pe->relative_number && rel != 0 ? rel : line_no + 1;
+        snprintf(raw, sizeof(raw), "%d", pe->show_number ? shown_no : 0);
+        int raw_len = (int)strlen(raw);
+        int pad = width > raw_len ? width - raw_len : 0;
+        memset(num, ' ', (size_t)pad);
+        snprintf(num + pad, sizeof(num) - (size_t)pad, "%s", raw);
+        if (pe->show_number) draw_text(dl, &vk->font, num, x0 + 8.0f, y, rel == 0 && active ? gruvbox.line_no_current : gruvbox.gutter_fg);
+        size_t start = line_start_by_number(&pe->text, line_no);
+        size_t end = line_end_at(&pe->text, start);
+        float x = x0 + gutter_w + 8.0f;
+        for (size_t p = start + (size_t)pe->left_col; p < end; p++) {
+            if (in_selection(pe, p)) draw_rect(dl, x, y, cell, line_h, gruvbox.selection);
+            else if (in_search_match(pe, p)) draw_rect(dl, x, y, cell, line_h, gruvbox.search_match);
+            Color c = color_for_highlight(highlight_at(pe, p));
+            char ch = pe->text.data[p];
+            if (ch == '\t') x += cell * 4.0f;
+            else {
+                draw_glyph(dl, &vk->font, ch, x, y, c);
+                x += cell;
+            }
+            if (x > x0 + w) break;
+        }
+    }
+    char label[192];
+    const BufferSlot *buffer = pe->current_buffer < pe->buffer_count ? &pe->buffers[pe->current_buffer] : NULL;
+    snprintf(label, sizeof(label), " %zu:%s%s ", pe->current_buffer + 1, buffer ? buffer_display_name(buffer) : "[No Name]", pe->dirty ? " +" : "");
+    draw_rect(dl, x0 + 1.0f, y0 + h - line_h, fminf((float)strlen(label) * cell + 8.0f, w - 2.0f), line_h - 1.0f, gruvbox.gutter_bg);
+    draw_text(dl, &vk->font, label, x0 + 5.0f, y0 + h - line_h + 1.0f, active ? gruvbox.line_no_current : gruvbox.gutter_fg);
+}
+
 static void build_draw_list(App *owner, DrawList *dl) {
     Editor *e = &owner->editor;
     VkApp *vk = &owner->vk;
@@ -837,52 +986,29 @@ static void build_draw_list(App *owner, DrawList *dl) {
     float w = (float)vk->extent.width;
     float h = (float)vk->extent.height;
     float line_h = vk->font.line_h;
-    float cell = vk->font.cell_w;
-    int rows = (int)((h - line_h * 2.0f) / line_h);
-    if (rows < 1) rows = 1;
-    int gutter_digits = (int)log10((double)(line_count(&e->text) + 1)) + 2;
-    float gutter_w = (float)gutter_digits * cell + 18.0f;
-    int cols = (int)((w - gutter_w - 12.0f) / cell);
-    editor_ensure_visible(e, rows, cols);
-    build_cursor_segments(owner, gutter_w, cell, line_h, rows, h - line_h * 2.0f, h - line_h);
     draw_rect(dl, 0, 0, w, h, gruvbox.bg);
-    draw_rect(dl, 0, 0, gutter_w, h, gruvbox.gutter_bg);
-    int cursor_line = byte_line(&e->text, e->cursor);
-    for (int row = 0; row < rows; row++) {
-        int line_no = e->top_line + row;
-        if (line_no >= line_count(&e->text)) break;
-        float y = row * line_h + 2.0f;
-        char num[32];
-        int rel = abs(line_no - cursor_line);
-        int width = gutter_digits - 1;
-        if (width > 16) width = 16;
-        char raw[24];
-        int shown_no = e->relative_number && rel != 0 ? rel : line_no + 1;
-        snprintf(raw, sizeof(raw), "%d", e->show_number ? shown_no : 0);
-        int raw_len = (int)strlen(raw);
-        int pad = width > raw_len ? width - raw_len : 0;
-        memset(num, ' ', (size_t)pad);
-        snprintf(num + pad, sizeof(num) - (size_t)pad, "%s", raw);
-        if (e->show_number) draw_text(dl, &vk->font, num, 8.0f, y, rel == 0 ? gruvbox.line_no_current : gruvbox.gutter_fg);
-        size_t start = line_start_by_number(&e->text, line_no);
-        size_t end = line_end_at(&e->text, start);
-        float x = gutter_w + 8.0f;
-        for (size_t p = start + (size_t)e->left_col; p < end; p++) {
-            if (in_selection(e, p)) draw_rect(dl, x, y, cell, line_h, gruvbox.selection);
-            else if (in_search_match(e, p)) draw_rect(dl, x, y, cell, line_h, gruvbox.search_match);
-            Color c = color_for_highlight(highlight_at(e, p));
-            char ch = e->text.data[p];
-            if (ch == '\t') {
-                x += cell * 4.0f;
-            } else {
-                draw_glyph(dl, &vk->font, ch, x, y, c);
-                x += cell;
-            }
-            if (x > w) break;
-        }
-    }
+    draw_tab_bar(owner, dl, w, line_h);
     float status_y = h - line_h * 2.0f;
     float command_y = h - line_h;
+    float tab_h = tab_bar_height(e, line_h);
+    float editor_y = tab_h;
+    float editor_h = h - tab_h - line_h * 2.0f;
+    if (editor_h < line_h) editor_h = line_h;
+    EditorTab *tab = e->tab_count ? &e->tabs[e->current_tab] : NULL;
+    PaneRect panes[EDITOR_MAX_VIEWS];
+    size_t pane_count = 0;
+    if (tab) collect_panes(tab, tab->root, 0.0f, editor_y, w, editor_h, panes, &pane_count);
+    for (size_t i = 0; i < pane_count; i++) {
+        bool active = tab && panes[i].view_index == tab->active_view;
+        if (active) {
+            draw_editor_pane(owner, dl, e, panes[i].x, panes[i].y, panes[i].w, panes[i].h, true, command_y);
+            editor_sync_active_view(e);
+        } else {
+            Editor tmp;
+            apply_view_for_render(&tmp, e, panes[i].view_index);
+            draw_editor_pane(owner, dl, &tmp, panes[i].x, panes[i].y, panes[i].w, panes[i].h, false, command_y);
+        }
+    }
     draw_rect(dl, 0, status_y, w, line_h, gruvbox.gutter_bg);
     draw_rect(dl, 0, command_y, w, line_h, gruvbox.bg);
     char pending[64];

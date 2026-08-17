@@ -37,6 +37,9 @@
 #define CURSOR_ANIM_DAMPING 0.82f
 #define CURSOR_MAX_TRAIL_CELLS 18.0f
 #define CURSOR_SEGMENT_MAX 4
+#define EDITOR_MAX_TABS 16
+#define EDITOR_MAX_VIEWS 32
+#define EDITOR_MAX_SPLIT_NODES 63
 
 typedef struct {
     float r, g, b, a;
@@ -121,6 +124,35 @@ typedef struct {
 } BufferSlot;
 
 typedef struct {
+    size_t buffer_index;
+    size_t cursor;
+    size_t visual_anchor;
+    int desired_col;
+    int top_line;
+    int left_col;
+    AnimatedCursor cursor_anim;
+} EditorView;
+
+typedef enum { SPLIT_LEAF, SPLIT_ROW, SPLIT_COL } SplitKind;
+
+typedef struct {
+    SplitKind kind;
+    float ratio;
+    int first;
+    int second;
+    size_t view_index;
+} SplitNode;
+
+typedef struct {
+    EditorView views[EDITOR_MAX_VIEWS];
+    size_t view_count;
+    size_t active_view;
+    SplitNode nodes[EDITOR_MAX_SPLIT_NODES];
+    size_t node_count;
+    int root;
+} EditorTab;
+
+typedef struct {
     Text text;
     char path[512];
     bool dirty;
@@ -168,6 +200,10 @@ typedef struct {
     BufferSlot *buffers;
     size_t buffer_count;
     size_t current_buffer;
+    EditorTab tabs[EDITOR_MAX_TABS];
+    size_t tab_count;
+    size_t current_tab;
+    char window_pending;
 } Editor;
 
 typedef struct {
@@ -301,6 +337,13 @@ void editor_handle_waiting_char(Editor *e, char ch);
 void editor_insert_char(Editor *e, unsigned int cp);
 HighlightKind highlight_at(const Editor *e, size_t byte);
 void app_execute_command(App *app);
+void editor_sync_active_view(Editor *e);
+void editor_split_current(Editor *e, bool vertical, const char *path);
+void editor_close_view(Editor *e, bool only);
+void editor_focus_view_direction(Editor *e, char dir);
+void editor_tab_new(Editor *e, const char *path);
+void editor_tab_switch(Editor *e, int delta);
+void editor_tab_close(Editor *e);
 
 void vk_init(App *owner);
 void draw_frame(App *owner);

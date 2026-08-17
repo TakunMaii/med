@@ -392,9 +392,7 @@ void editor_store_current_buffer(Editor *e) {
     b->redo = e->redo;
 }
 
-void editor_load_buffer(Editor *e, size_t index) {
-    if (!e->buffers || index >= e->buffer_count) return;
-    editor_store_current_buffer(e);
+static void editor_apply_buffer_slot(Editor *e, size_t index) {
     e->current_buffer = index;
     BufferSlot *b = &e->buffers[index];
     e->text = b->text;
@@ -409,6 +407,74 @@ void editor_load_buffer(Editor *e, size_t index) {
     e->highlights = b->highlights;
     e->undo = b->undo;
     e->redo = b->redo;
+}
+
+static EditorTab *editor_active_tab(Editor *e) {
+    if (e->tab_count == 0) return NULL;
+    if (e->current_tab >= e->tab_count) e->current_tab = e->tab_count - 1;
+    return &e->tabs[e->current_tab];
+}
+
+static EditorView *editor_active_view(Editor *e) {
+    EditorTab *tab = editor_active_tab(e);
+    if (!tab || tab->view_count == 0) return NULL;
+    if (tab->active_view >= tab->view_count) tab->active_view = tab->view_count - 1;
+    return &tab->views[tab->active_view];
+}
+
+void editor_sync_active_view(Editor *e) {
+    EditorView *v = editor_active_view(e);
+    if (!v) return;
+    v->buffer_index = e->current_buffer;
+    v->cursor = e->cursor;
+    v->visual_anchor = e->visual_anchor;
+    v->desired_col = e->desired_col;
+    v->top_line = e->top_line;
+    v->left_col = e->left_col;
+    v->cursor_anim = e->cursor_anim;
+}
+
+static void editor_load_view_state(Editor *e, size_t view_index, bool save_current) {
+    EditorTab *tab = editor_active_tab(e);
+    if (!tab || view_index >= tab->view_count) return;
+    if (save_current) {
+        editor_store_current_buffer(e);
+        editor_sync_active_view(e);
+    }
+    tab->active_view = view_index;
+    EditorView *v = &tab->views[view_index];
+    if (v->buffer_index >= e->buffer_count) v->buffer_index = 0;
+    editor_apply_buffer_slot(e, v->buffer_index);
+    if (!e->tree) {
+        editor_reparse(e);
+        editor_store_current_buffer(e);
+    }
+    e->cursor = v->cursor <= e->text.len ? v->cursor : e->text.len;
+    e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
+    e->visual_anchor = v->visual_anchor <= e->text.len ? v->visual_anchor : e->cursor;
+    e->desired_col = v->desired_col;
+    e->top_line = v->top_line;
+    e->left_col = v->left_col;
+    e->cursor_anim = v->cursor_anim;
+    e->mode = MODE_NORMAL;
+    e->pending = 0;
+    e->operator_pending = 0;
+    e->count = 0;
+    e->operator_count = 0;
+    e->waiting_char = 0;
+    e->window_pending = 0;
+    e->cursor_trail_len = 0;
+}
+
+static void editor_load_view(Editor *e, size_t view_index) {
+    editor_load_view_state(e, view_index, true);
+}
+
+void editor_load_buffer(Editor *e, size_t index) {
+    if (!e->buffers || index >= e->buffer_count) return;
+    editor_store_current_buffer(e);
+    editor_apply_buffer_slot(e, index);
+    if (!e->tree) editor_reparse(e);
     e->mode = MODE_NORMAL;
     e->pending = 0;
     e->operator_pending = 0;
@@ -417,6 +483,16 @@ void editor_load_buffer(Editor *e, size_t index) {
     e->waiting_char = 0;
     e->cursor_trail_len = 0;
     e->cursor_anim.initialized = false;
+    EditorView *v = editor_active_view(e);
+    if (v) {
+        v->buffer_index = index;
+        v->cursor = e->cursor;
+        v->visual_anchor = e->visual_anchor;
+        v->desired_col = e->desired_col;
+        v->top_line = e->top_line;
+        v->left_col = e->left_col;
+        v->cursor_anim = e->cursor_anim;
+    }
 }
 
 static void editor_add_buffer(Editor *e, const char *path, const char *content, size_t len) {
@@ -431,14 +507,21 @@ static void editor_add_buffer(Editor *e, const char *path, const char *content, 
     e->buffer_count++;
 }
 
-bool editor_open_buffer(Editor *e, const char *path) {
+static bool editor_open_buffer_index(Editor *e, const char *path, size_t *out) {
     size_t n = 0;
     char *data = read_file(path, &n);
     if (!data) return false;
-    editor_store_current_buffer(e);
     editor_add_buffer(e, path, data, n);
     free(data);
-    editor_load_buffer(e, e->buffer_count - 1);
+    *out = e->buffer_count - 1;
+    return true;
+}
+
+bool editor_open_buffer(Editor *e, const char *path) {
+    size_t index = 0;
+    editor_store_current_buffer(e);
+    if (!editor_open_buffer_index(e, path, &index)) return false;
+    editor_load_buffer(e, index);
     editor_reparse(e);
     editor_store_current_buffer(e);
     return true;
@@ -532,6 +615,226 @@ void editor_init(Editor *e, const char *path) {
     e->buffer_count = 1;
     e->current_buffer = 0;
     editor_store_current_buffer(e);
+    e->tab_count = 1;
+    e->current_tab = 0;
+    EditorTab *tab = &e->tabs[0];
+    memset(tab, 0, sizeof(*tab));
+    tab->view_count = 1;
+    tab->active_view = 0;
+    tab->views[0] = (EditorView){
+        .buffer_index = 0,
+        .cursor = e->cursor,
+        .visual_anchor = e->visual_anchor,
+        .desired_col = e->desired_col,
+        .top_line = e->top_line,
+        .left_col = e->left_col,
+    };
+    tab->node_count = 1;
+    tab->root = 0;
+    tab->nodes[0] = (SplitNode){.kind = SPLIT_LEAF, .ratio = 0.5f, .first = -1, .second = -1, .view_index = 0};
+}
+
+static EditorView make_view_from_editor(Editor *e, size_t buffer_index) {
+    return (EditorView){
+        .buffer_index = buffer_index,
+        .cursor = e->cursor,
+        .visual_anchor = e->visual_anchor,
+        .desired_col = e->desired_col,
+        .top_line = e->top_line,
+        .left_col = e->left_col,
+    };
+}
+
+static int split_find_leaf_for_view(EditorTab *tab, int node_index, size_t view_index) {
+    if (node_index < 0 || (size_t)node_index >= tab->node_count) return -1;
+    SplitNode *n = &tab->nodes[node_index];
+    if (n->kind == SPLIT_LEAF) return n->view_index == view_index ? node_index : -1;
+    int found = split_find_leaf_for_view(tab, n->first, view_index);
+    return found >= 0 ? found : split_find_leaf_for_view(tab, n->second, view_index);
+}
+
+static int split_find_parent(EditorTab *tab, int node_index, int child_index) {
+    if (node_index < 0 || (size_t)node_index >= tab->node_count) return -1;
+    SplitNode *n = &tab->nodes[node_index];
+    if (n->kind == SPLIT_LEAF) return -1;
+    if (n->first == child_index || n->second == child_index) return node_index;
+    int found = split_find_parent(tab, n->first, child_index);
+    return found >= 0 ? found : split_find_parent(tab, n->second, child_index);
+}
+
+static bool split_remove_leaf(EditorTab *tab, int leaf_index) {
+    if (leaf_index < 0 || (size_t)leaf_index >= tab->node_count) return false;
+    if (leaf_index == tab->root) return false;
+    int parent_index = split_find_parent(tab, tab->root, leaf_index);
+    if (parent_index < 0) return false;
+    SplitNode *parent = &tab->nodes[parent_index];
+    int sibling_index = parent->first == leaf_index ? parent->second : parent->first;
+    parent->kind = tab->nodes[sibling_index].kind;
+    parent->ratio = tab->nodes[sibling_index].ratio;
+    parent->first = tab->nodes[sibling_index].first;
+    parent->second = tab->nodes[sibling_index].second;
+    parent->view_index = tab->nodes[sibling_index].view_index;
+    return true;
+}
+
+static void tab_init_single_view(EditorTab *tab, size_t buffer_index, Editor *e) {
+    memset(tab, 0, sizeof(*tab));
+    tab->view_count = 1;
+    tab->active_view = 0;
+    tab->views[0] = make_view_from_editor(e, buffer_index);
+    tab->nodes[0] = (SplitNode){.kind = SPLIT_LEAF, .ratio = 0.5f, .first = -1, .second = -1, .view_index = 0};
+    tab->node_count = 1;
+    tab->root = 0;
+}
+
+void editor_split_current(Editor *e, bool vertical, const char *path) {
+    EditorTab *tab = editor_active_tab(e);
+    if (!tab || tab->view_count >= EDITOR_MAX_VIEWS || tab->node_count + 2 > EDITOR_MAX_SPLIT_NODES) return;
+    editor_store_current_buffer(e);
+    editor_sync_active_view(e);
+    size_t buffer_index = e->current_buffer;
+    bool opened_path = false;
+    if (path && path[0]) {
+        if (!editor_open_buffer_index(e, path, &buffer_index)) {
+            editor_set_status(e, "Split edit failed");
+            return;
+        }
+        opened_path = true;
+    }
+    size_t new_view = tab->view_count++;
+    tab->views[new_view] = make_view_from_editor(e, buffer_index);
+    if (opened_path) {
+        tab->views[new_view].cursor = 0;
+        tab->views[new_view].visual_anchor = 0;
+        tab->views[new_view].desired_col = -1;
+        tab->views[new_view].top_line = 0;
+        tab->views[new_view].left_col = 0;
+    }
+    tab->views[new_view].cursor_anim.initialized = false;
+    int leaf = split_find_leaf_for_view(tab, tab->root, tab->active_view);
+    if (leaf < 0) return;
+    int old_leaf = (int)tab->node_count++;
+    int new_leaf = (int)tab->node_count++;
+    size_t old_view = tab->nodes[leaf].view_index;
+    tab->nodes[old_leaf] = (SplitNode){.kind = SPLIT_LEAF, .ratio = 0.5f, .first = -1, .second = -1, .view_index = old_view};
+    tab->nodes[new_leaf] = (SplitNode){.kind = SPLIT_LEAF, .ratio = 0.5f, .first = -1, .second = -1, .view_index = new_view};
+    tab->nodes[leaf] = (SplitNode){.kind = vertical ? SPLIT_COL : SPLIT_ROW, .ratio = 0.5f, .first = old_leaf, .second = new_leaf, .view_index = 0};
+    editor_load_view(e, new_view);
+}
+
+void editor_close_view(Editor *e, bool only) {
+    EditorTab *tab = editor_active_tab(e);
+    if (!tab) return;
+    editor_store_current_buffer(e);
+    editor_sync_active_view(e);
+    if (only) {
+        EditorView active = tab->views[tab->active_view];
+        tab_init_single_view(tab, active.buffer_index, e);
+        tab->views[0] = active;
+        editor_load_view_state(e, 0, false);
+        return;
+    }
+    if (tab->view_count <= 1) {
+        editor_set_status(e, "Cannot close the last window");
+        return;
+    }
+    size_t closing = tab->active_view;
+    int leaf = split_find_leaf_for_view(tab, tab->root, closing);
+    split_remove_leaf(tab, leaf);
+    for (size_t i = closing + 1; i < tab->view_count; i++) tab->views[i - 1] = tab->views[i];
+    tab->view_count--;
+    for (size_t i = 0; i < tab->node_count; i++) {
+        if (tab->nodes[i].kind == SPLIT_LEAF && tab->nodes[i].view_index > closing) tab->nodes[i].view_index--;
+    }
+    size_t next = closing >= tab->view_count ? tab->view_count - 1 : closing;
+    editor_load_view_state(e, next, false);
+}
+
+static void collect_leaf_views(EditorTab *tab, int node_index, size_t *out, size_t *count) {
+    if (node_index < 0 || (size_t)node_index >= tab->node_count) return;
+    SplitNode *n = &tab->nodes[node_index];
+    if (n->kind == SPLIT_LEAF) {
+        out[(*count)++] = n->view_index;
+        return;
+    }
+    collect_leaf_views(tab, n->first, out, count);
+    collect_leaf_views(tab, n->second, out, count);
+}
+
+void editor_focus_view_direction(Editor *e, char dir) {
+    EditorTab *tab = editor_active_tab(e);
+    if (!tab || tab->view_count <= 1) return;
+    editor_store_current_buffer(e);
+    editor_sync_active_view(e);
+    size_t leaves[EDITOR_MAX_VIEWS];
+    size_t count = 0;
+    collect_leaf_views(tab, tab->root, leaves, &count);
+    if (count == 0) return;
+    size_t at = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (leaves[i] == tab->active_view) {
+            at = i;
+            break;
+        }
+    }
+    size_t next = at;
+    if (dir == 'h' || dir == 'k') next = at == 0 ? count - 1 : at - 1;
+    else next = (at + 1) % count;
+    editor_load_view(e, leaves[next]);
+}
+
+void editor_tab_new(Editor *e, const char *path) {
+    if (e->tab_count >= EDITOR_MAX_TABS) {
+        editor_set_status(e, "Too many tabs");
+        return;
+    }
+    editor_store_current_buffer(e);
+    editor_sync_active_view(e);
+    size_t buffer_index = e->current_buffer;
+    if (path && path[0]) {
+        if (!editor_open_buffer_index(e, path, &buffer_index)) {
+            editor_set_status(e, "Tab edit failed");
+            return;
+        }
+    } else {
+        editor_add_buffer(e, NULL, "", 0);
+        buffer_index = e->buffer_count - 1;
+    }
+    size_t tab_index = e->tab_count++;
+    e->current_tab = tab_index;
+    tab_init_single_view(&e->tabs[tab_index], buffer_index, e);
+    e->tabs[tab_index].views[0].cursor = 0;
+    e->tabs[tab_index].views[0].visual_anchor = 0;
+    e->tabs[tab_index].views[0].desired_col = -1;
+    e->tabs[tab_index].views[0].top_line = 0;
+    e->tabs[tab_index].views[0].left_col = 0;
+    e->tabs[tab_index].views[0].cursor_anim.initialized = false;
+    editor_load_view_state(e, 0, false);
+}
+
+void editor_tab_switch(Editor *e, int delta) {
+    if (e->tab_count == 0) return;
+    editor_store_current_buffer(e);
+    editor_sync_active_view(e);
+    if (delta > 0) e->current_tab = (e->current_tab + 1) % e->tab_count;
+    else e->current_tab = e->current_tab == 0 ? e->tab_count - 1 : e->current_tab - 1;
+    EditorTab *tab = editor_active_tab(e);
+    editor_load_view_state(e, tab ? tab->active_view : 0, false);
+}
+
+void editor_tab_close(Editor *e) {
+    if (e->tab_count <= 1) {
+        editor_set_status(e, "Cannot close the last tab");
+        return;
+    }
+    editor_store_current_buffer(e);
+    size_t old = e->current_tab;
+    memmove(&e->tabs[old], &e->tabs[old + 1], (e->tab_count - old - 1) * sizeof(*e->tabs));
+    e->tab_count--;
+    if (old >= e->tab_count) old = e->tab_count - 1;
+    e->current_tab = old;
+    EditorTab *tab = editor_active_tab(e);
+    editor_load_view_state(e, tab ? tab->active_view : 0, false);
 }
 
 void editor_ensure_visible(Editor *e, int rows, int cols) {
@@ -1140,6 +1443,7 @@ void editor_key(Editor *e, int key, int mods, int rows) {
         e->waiting_char = 0;
         e->visual_block = false;
         e->visual_line = false;
+        e->window_pending = 0;
         e->command_len = 0;
         e->command[0] = 0;
         e->cursor = clamp_cursor_for_normal(&e->text, e->cursor);
@@ -1157,6 +1461,16 @@ void editor_key(Editor *e, int key, int mods, int rows) {
     }
     char c = key_to_motion_char(key, shift);
     if (!c) return;
+    if (e->window_pending) {
+        if (c == 's') editor_split_current(e, false, NULL);
+        else if (c == 'v') editor_split_current(e, true, NULL);
+        else if (c == 'c') editor_close_view(e, false);
+        else if (c == 'o') editor_close_view(e, true);
+        else if (c == 'h' || c == 'j' || c == 'k' || c == 'l') editor_focus_view_direction(e, c);
+        e->window_pending = 0;
+        e->count = 0;
+        return;
+    }
     if (!e->operator_pending && c >= '1' && c <= '9') {
         e->count = e->count * 10 + (c - '0');
         return;
@@ -1210,6 +1524,9 @@ void editor_key(Editor *e, int key, int mods, int rows) {
             e->visual_block = true;
             e->visual_anchor = e->cursor;
         }
+        e->pending = 0;
+    } else if ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_W) {
+        e->window_pending = 'w';
         e->pending = 0;
     } else if (c == 'u') {
         editor_undo(e);
@@ -1482,6 +1799,35 @@ void app_execute_command(App *app) {
     } else if (strncmp(cmd, "e ", 2) == 0 || strncmp(cmd, "edit ", 5) == 0) {
         char *path = trim_command(cmd + (cmd[0] == 'e' ? 2 : 5));
         if (!editor_open_buffer(e, path)) editor_set_status(e, "Edit failed");
+    } else if (strcmp(cmd, "sp") == 0 || strcmp(cmd, "split") == 0 || strncmp(cmd, "sp ", 3) == 0 || strncmp(cmd, "split ", 6) == 0) {
+        char *path = NULL;
+        if (strncmp(cmd, "sp ", 3) == 0) path = trim_command(cmd + 3);
+        else if (strncmp(cmd, "split ", 6) == 0) path = trim_command(cmd + 6);
+        editor_split_current(e, false, path);
+    } else if (strcmp(cmd, "vsp") == 0 || strcmp(cmd, "vsplit") == 0 || strncmp(cmd, "vsp ", 4) == 0 || strncmp(cmd, "vsplit ", 7) == 0) {
+        char *path = NULL;
+        if (strncmp(cmd, "vsp ", 4) == 0) path = trim_command(cmd + 4);
+        else if (strncmp(cmd, "vsplit ", 7) == 0) path = trim_command(cmd + 7);
+        editor_split_current(e, true, path);
+    } else if (strcmp(cmd, "close") == 0 || strcmp(cmd, "clo") == 0) {
+        editor_close_view(e, false);
+    } else if (strcmp(cmd, "only") == 0 || strcmp(cmd, "on") == 0) {
+        editor_close_view(e, true);
+    } else if (strncmp(cmd, "wincmd ", 7) == 0) {
+        char *arg = trim_command(cmd + 7);
+        if (arg[0]) editor_focus_view_direction(e, arg[0]);
+    } else if (strcmp(cmd, "tabnew") == 0 || strncmp(cmd, "tabnew ", 7) == 0) {
+        char *path = strncmp(cmd, "tabnew ", 7) == 0 ? trim_command(cmd + 7) : NULL;
+        editor_tab_new(e, path);
+    } else if (strncmp(cmd, "tabedit ", 8) == 0 || strncmp(cmd, "tabe ", 5) == 0) {
+        char *path = trim_command(cmd + (cmd[3] == 'e' && cmd[4] == ' ' ? 5 : 8));
+        editor_tab_new(e, path);
+    } else if (strcmp(cmd, "tabnext") == 0 || strcmp(cmd, "tabn") == 0) {
+        editor_tab_switch(e, 1);
+    } else if (strcmp(cmd, "tabprev") == 0 || strcmp(cmd, "tabp") == 0) {
+        editor_tab_switch(e, -1);
+    } else if (strcmp(cmd, "tabclose") == 0 || strcmp(cmd, "tabc") == 0) {
+        editor_tab_close(e);
     } else if (strcmp(cmd, "bnew") == 0 || strcmp(cmd, "new") == 0) {
         editor_store_current_buffer(e);
         editor_add_buffer(e, NULL, "", 0);
